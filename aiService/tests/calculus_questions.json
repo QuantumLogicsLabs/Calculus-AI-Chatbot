@@ -1,0 +1,106 @@
+{
+  "test_suite": "CalcVoyager System Prompt Acceptance Test",
+  "description": "CB-2: 20 calculus questions spanning all scope topics",
+  "questions": [
+    {
+      "id": 1,
+      "topic": "limits",
+      "question": "What is the limit of (x² - 4)/(x - 2) as x approaches 2?"
+    },
+    {
+      "id": 2,
+      "topic": "limits",
+      "question": "Explain what it means for a limit to exist at a point."
+    },
+    {
+      "id": 3,
+      "topic": "continuity",
+      "question": "Is the function f(x,y) = xy/(x² + y²) continuous at the origin?"
+    },
+    {
+      "id": 4,
+      "topic": "continuity",
+      "question": "What are the three conditions for a function to be continuous at a point?"
+    },
+    {
+      "id": 5,
+      "topic": "partial_derivatives",
+      "question": "Find the partial derivative ∂f/∂x for f(x,y) = x³y² + 2xy."
+    },
+    {
+      "id": 6,
+      "topic": "partial_derivatives",
+      "question": "What does the partial derivative ∂f/∂y represent geometrically?"
+    },
+    {
+      "id": 7,
+      "topic": "partial_derivatives",
+      "question": "Calculate all second-order partial derivatives for f(x,y) = e^(xy)."
+    },
+    {
+      "id": 8,
+      "topic": "gradients",
+      "question": "Find the gradient of f(x,y,z) = x²y + yz² at the point (1,2,1)."
+    },
+    {
+      "id": 9,
+      "topic": "gradients",
+      "question": "Explain the geometric meaning of the gradient vector."
+    },
+    {
+      "id": 10,
+      "topic": "directional_derivatives",
+      "question": "How do you find the directional derivative of f in the direction of vector v?"
+    },
+    {
+      "id": 11,
+      "topic": "chain_rule",
+      "question": "Use the chain rule to find dz/dt where z = x²y, x = cos(t), y = sin(t)."
+    },
+    {
+      "id": 12,
+      "topic": "chain_rule",
+      "question": "Explain the multivariable chain rule for z = f(x,y) where x = g(t) and y = h(t)."
+    },
+    {
+      "id": 13,
+      "topic": "multiple_integrals",
+      "question": "Evaluate the double integral ∫∫ xy dA over the rectangle [0,2] × [0,3]."
+    },
+    {
+      "id": 14,
+      "topic": "multiple_integrals",
+      "question": "What is the geometric interpretation of a double integral?"
+    },
+    {
+      "id": 15,
+      "topic": "vector_calculus",
+      "question": "Calculate the divergence of the vector field F = ⟨x², y², z²⟩."
+    },
+    {
+      "id": 16,
+      "topic": "vector_calculus",
+      "question": "Find the curl of F = ⟨y, -x, z⟩ and explain what it represents."
+    },
+    {
+      "id": 17,
+      "topic": "lagrange_multipliers",
+      "question": "Use Lagrange multipliers to find the maximum of f(x,y) = xy subject to x² + y² = 1."
+    },
+    {
+      "id": 18,
+      "topic": "lagrange_multipliers",
+      "question": "Explain when and why we use Lagrange multipliers for optimization."
+    },
+    {
+      "id": 19,
+      "topic": "taylor_series",
+      "question": "Find the second-order Taylor polynomial for f(x,y) = e^(x+y) at (0,0)."
+    },
+    {
+      "id": 20,
+      "topic": "taylor_series",
+      "question": "What is the purpose of linearization in multivariable calculus?"
+    }
+  ]
+}

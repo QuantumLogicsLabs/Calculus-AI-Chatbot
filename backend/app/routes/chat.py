@@ -1,6 +1,7 @@
 # routers/chat.py - Complete chat implementation for Starlette
 import json
 import uuid
+import httpx
 from typing import Optional, Dict, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -8,6 +9,9 @@ from starlette.routing import Route
 
 from auth_utils import require_user
 from db import fetchone, fetchall, execute, scalar
+
+# Configuration for aiService
+AI_SERVICE_URL = "http://127.0.0.1:8001"  # aiService chatbot.py runs on port 8001
 
 # ── Helper Functions ──────────────────────────────────────────────────────────
 
@@ -282,9 +286,139 @@ async def get_session_messages(request: Request):
     return await get_conversation_history(request)
 
 
+async def chat_endpoint(request: Request):
+    """
+    POST /api/chat - Main chat endpoint that combines LLM calls with DB storage
+    
+    Accepts: { messages, context, page_url }
+    Returns: { reply, suggestions }
+    
+    If authenticated: saves user message and assistant reply to DB
+    """
+    try:
+        body = await request.json()
+    except:
+        return json_response({"detail": "Invalid JSON body"}, 400)
+    
+    messages = body.get('messages', [])
+    context = body.get('context', '')
+    page_url = body.get('page_url', '/')
+    
+    if not messages:
+        return json_response({"detail": "messages array is required"}, 400)
+    
+    # Extract the latest user message
+    user_message = None
+    if messages and isinstance(messages, list):
+        for msg in reversed(messages):
+            if msg.get('role') == 'user':
+                user_message = msg.get('content', '')
+                break
+    
+    if not user_message:
+        return json_response({"detail": "No user message found"}, 400)
+    
+    # Get user_id if authenticated (optional - guests can chat too)
+    user_id = None
+    try:
+        user_id = require_user(request)
+    except:
+        pass  # Guest user
+    
+    # Call the aiService chatbot
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            ai_response = await client.post(
+                f"{AI_SERVICE_URL}/chat",
+                json={
+                    "message": user_message,
+                    "topic": context or "",
+                    "history": messages[:-1] if len(messages) > 1 else []
+                }
+            )
+            ai_response.raise_for_status()
+            ai_data = ai_response.json()
+    except httpx.TimeoutException:
+        return json_response(
+            {"detail": "AI service timeout - please try again"},
+            504
+        )
+    except httpx.HTTPError as e:
+        return json_response(
+            {"detail": f"AI service error: {str(e)}"},
+            502
+        )
+    except Exception as e:
+        return json_response(
+            {"detail": f"Failed to reach AI service: {str(e)}"},
+            500
+        )
+    
+    reply = ai_data.get('answer', '')
+    suggestions = ai_data.get('suggestions', [])
+    
+    # If user is authenticated, save to database
+    if user_id:
+        try:
+            # Get or create active session
+            active_session = await fetchone(
+                "SELECT session_id FROM chat_sessions "
+                "WHERE user_id = ? AND is_active = 1 "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (user_id,)
+            )
+            
+            if not active_session:
+                # Create new session
+                session_id = str(uuid.uuid4())
+                # Generate title from first message (first 50 chars)
+                title = user_message[:50] + ('...' if len(user_message) > 50 else '')
+                await execute(
+                    "INSERT INTO chat_sessions (user_id, session_id, title, updated_at) "
+                    "VALUES (?, ?, ?, strftime('%s','now'))",
+                    (user_id, session_id, title)
+                )
+            else:
+                session_id = active_session['session_id']
+            
+            # Save user message
+            await execute(
+                "INSERT INTO chat_messages (user_id, session_id, message_type, content, metadata) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, session_id, 'user', user_message, json.dumps({"page_url": page_url}))
+            )
+            
+            # Save assistant reply
+            metadata = {"page_url": page_url}
+            if suggestions:
+                metadata["suggestions"] = suggestions
+            
+            await execute(
+                "INSERT INTO chat_messages (user_id, session_id, message_type, content, metadata) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, session_id, 'assistant', reply, json.dumps(metadata))
+            )
+            
+            # Update session timestamp
+            await execute(
+                "UPDATE chat_sessions SET updated_at = strftime('%s','now') WHERE session_id = ?",
+                (session_id,)
+            )
+        except Exception as e:
+            # Log error but don't fail the request - user still gets their answer
+            import logging
+            logging.error(f"Failed to save chat to DB: {str(e)}")
+    
+    return json_response({
+        "reply": reply,
+        "suggestions": suggestions
+    })
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 routes = [
+    Route("/chat", chat_endpoint, methods=["POST"]),  # Main chat endpoint
     Route("/sessions", create_session, methods=["POST"]),
     Route("/sessions", get_sessions, methods=["GET"]),
     Route("/sessions/{session_id}", update_session_title, methods=["PUT"]),
