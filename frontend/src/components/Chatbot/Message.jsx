@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import ProblemTracker from "./ProblemTracker";
+
 
 function parseLatex(text) {
   const segments = [];
@@ -171,9 +171,6 @@ function Message({ message }) {
                 </div>
               )}
 
-              <ProblemTracker
-                content={message.content}
-              />
             </>
         )}
           {message.timestamp && (

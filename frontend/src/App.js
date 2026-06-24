@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import Chatbot from "./components/Chatbot/Chatbot";
 import "./index.css";
+import Dashboard from "./components/Dashboard/Dashboard";
+
 
 function DemoPage({ title }) {
     return (
@@ -13,6 +15,7 @@ function DemoPage({ title }) {
           <Link to="/vector-calculus/1">Vector Calculus</Link>
           <Link to="/limits-continuity/1">Limits</Link>
           <Link to="/ai-solver">AI Solver</Link>
+          <Link to="/dashboard">Dashboard</Link>
         </nav>
         <p style={{ marginTop: "2rem", fontSize: "0.85rem", color: "var(--muted)" }}>
           Change page → topic bar in chat should update (CB-5).
@@ -31,6 +34,7 @@ export default function App() {
           <Route path="/vector-calculus/1" element={<DemoPage title="Vector Calculus Part 1" />} />
           <Route path="/limits-continuity/1" element={<DemoPage title="Limits & Continuity Part 1" />} />
           <Route path="/ai-solver" element={<DemoPage title="AI Solver" />} />
+          <Route path="/dashboard" element={<Dashboard />} />
         </Routes>
         <Chatbot />
       </BrowserRouter>
