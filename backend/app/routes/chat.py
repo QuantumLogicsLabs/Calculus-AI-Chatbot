@@ -7,9 +7,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from auth_utils import require_user
-from db import fetchone, fetchall, execute, scalar
-
+# from auth_utils import require_user
+from backend.app.auth.auth_utils import require_user
+# from db import fetchone, fetchall, execute, scalar
+from backend.app.database.db import fetchone, fetchall, execute, scalar
 # Configuration for aiService
 AI_SERVICE_URL = "http://127.0.0.1:8001"  # aiService chatbot.py runs on port 8001
 

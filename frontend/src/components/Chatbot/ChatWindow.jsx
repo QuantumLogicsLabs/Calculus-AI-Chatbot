@@ -234,7 +234,7 @@ function ChatWindow({ onClose, onActivity }) {
             </button>
           )}
           <button type="button" className="cb-icon-btn" onClick={() => { setMessages([]); setSuggestions([]); setInput(""); }} title="Clear" aria-label="Clear conversation">⊘</button>
-          <button type="button" className="cb-icon-btn cb-icon-btn--close" onClick={onClose} aria-label="Close chat">✕</button>
+          {/* <button type="button" className="cb-icon-btn cb-icon-btn--close" onClick={onClose} aria-label="Close chat">✕</button> */}
         </div>
       </div>
 
