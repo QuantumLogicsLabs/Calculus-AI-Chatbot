@@ -56,7 +56,7 @@ function WelcomeScreen({ topic, onSelect }) {
     </div>
   );
 }
-
+// History items function
 function formatHistoryItems(raw) {
   if (!raw?.length) return [];
   if (raw[0]?.preview) return raw;
