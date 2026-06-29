@@ -2,6 +2,11 @@
 
 ## Running the Tests
 
+# 1. Set USE_MOCK = False in llm_client.py
+# 2. Make sure GROK_API_KEY is set in aiService/services/.env
+# 3. From the project root:
+
+python -m aiService.tests.chatbot_tests
 ### 1. Prerequisites
 
 Before running tests, ensure:

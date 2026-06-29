@@ -201,6 +201,20 @@ async def run_scope_enforcement_suite() -> bool:
         print(f"  Cal should refuse all 10 questions (refused {score}/10)")
     
     print()
+    # Save CB-8 results to a separate file
+    scope_output = {
+        "test": "CB-8 Scope Enforcement",
+        "score": f"{score}/10",
+        "passed": score == 10,
+        "results": [
+            {"question": q, "refused": r}
+            for q, r in zip(OFF_TOPIC_QUESTIONS, results)
+        ]
+    }
+    scope_file = Path(__file__).parent / "scope_results.json"
+    with open(scope_file, 'w', encoding='utf-8') as f:
+        json.dump(scope_output, f, indent=2)
+    print(f"Scope results saved to: {scope_file}")
     return score == 10
 
 
@@ -328,7 +342,7 @@ async def run_test_suite():
                 print(f"    ⚠ {error}")
         
         # CB-9: Show correctness score if available
-        if result.correctness_score > 0:
+        if result.correctness_score is not None and result.correctness_score > 0:
             print(f"  Correctness: {result.correctness_score:.2f}")
         
         print()
