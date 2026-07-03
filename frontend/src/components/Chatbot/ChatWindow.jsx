@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { sendMessage, fetchChatHistory } from "../../services/chatApi";
+import { sendMessage, sendMessageStream, createChatSession, fetchChatHistory } from "../../services/chatApi";
 import { getContextString, getTopicContext, getPageUrl } from "../../utils/routeContext";
 import Message from "./Message";
 import SuggestedQuestions from "./SuggestedQuestions";
@@ -86,6 +86,7 @@ function ChatWindow({ onClose, onActivity }) {
   const [tab, setTab] = useState("chat");
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -155,54 +156,116 @@ function ChatWindow({ onClose, onActivity }) {
       .map((m) => ({ role: m.role, content: m.content }));
 
   const handleSend = useCallback(async (text) => {
-    const trimmed = (text ?? input).trim();
-    if (!trimmed || isLoading) return;
+  const trimmed = (text ?? input).trim();
+  if (!trimmed || isLoading) return;
 
-    const userMsg = {
-      id: Date.now(),
-      role: "user",
-      content: trimmed,
-      timestamp: new Date().toISOString(),
-      userInitial: user?.username?.[0]?.toUpperCase() || "Y",
-    };
+  const userMsg = {
+    id: Date.now(),
+    role: "user",
+    content: trimmed,
+    timestamp: new Date().toISOString(),
+    userInitial: user?.username?.[0]?.toUpperCase() || "Y",
+  };
 
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setSuggestions([]);
-    setIsLoading(true);
+  setMessages((prev) => [...prev, userMsg]);
+  setInput("");
+  setSuggestions([]);
+  setIsLoading(true);
 
-    const context = getContextString(pathname);
-    const pageUrl = getPageUrl();
-    const token = user?.accessToken || null;
+  const context = getContextString(pathname);
+  const pageUrl = getPageUrl();
+  const token = user?.accessToken || null;
+  const historyPayload = buildHistory([...messages, userMsg]);
 
-    try {
-      const historyPayload = buildHistory([...messages, userMsg]);
-      const data = await sendMessage(historyPayload, context, token, pageUrl);
+  const botMsgId = Date.now() + 1;
+  let streamedAny = false;
 
-      const botMsg = {
-        id: Date.now() + 1,
-        role: "assistant",
-        content: data.reply || "Sorry, I didn't get a response. Please try again.",
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, botMsg]);
-      setSuggestions(data.suggestions || []);
-      onActivity?.();
-    } catch (err) {
-      // Demo fallback when backend is offline — shows normal bot UI + like/dislike
-      const botMsg = {
-        id: Date.now() + 1,
-        role: "assistant",
-        content: DEMO_BOT_REPLY,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, botMsg]);
-      setSuggestions(DEMO_SUGGESTIONS);
-      onActivity?.();
-    } finally {
-      setIsLoading(false);
+  // Placeholder bot message that fills in as tokens arrive
+  const startBotMessage = () => {
+    setMessages((prev) => [
+      ...prev,
+      { id: botMsgId, role: "assistant", content: "", timestamp: new Date().toISOString(), streaming: true },
+    ]);
+  };
+
+  const appendToken = (chunk) => {
+    if (!streamedAny) {
+      streamedAny = true;
+      startBotMessage();
     }
-  }, [input, isLoading, messages, user, pathname, onActivity]);
+    setMessages((prev) =>
+      prev.map((m) => (m.id === botMsgId ? { ...m, content: m.content + chunk } : m))
+    );
+  };
+
+  try {
+    await sendMessageStream(
+      historyPayload,
+      context,
+      token,
+      pageUrl,
+      appendToken,
+      ({ suggestions: finalSuggestions }) => {
+        setMessages((prev) => {
+          const exists = prev.some((m) => m.id === botMsgId);
+          if (!exists) {
+            return [
+              ...prev,
+              {
+                id: botMsgId,
+                role: "assistant",
+                content: "Sorry, I didn't get a response. Please try again.",
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          }
+          return prev.map((m) => (m.id === botMsgId ? { ...m, streaming: false } : m));
+        });
+        setSuggestions(finalSuggestions || []);
+        setIsLoading(false);
+        onActivity?.();
+      },
+      async () => {
+        // Streaming failed/unavailable — fall back to the original non-streaming call
+        try {
+          const data = await sendMessage(historyPayload, context, token, pageUrl);
+          setMessages((prev) => {
+            const withoutPlaceholder = prev.filter((m) => m.id !== botMsgId);
+            return [
+              ...withoutPlaceholder,
+              {
+                id: botMsgId,
+                role: "assistant",
+                content: data.reply || "Sorry, I didn't get a response. Please try again.",
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          });
+          setSuggestions(data.suggestions || []);
+        } catch (err) {
+          setMessages((prev) => {
+            const withoutPlaceholder = prev.filter((m) => m.id !== botMsgId);
+            return [
+              ...withoutPlaceholder,
+              {
+                id: botMsgId,
+                role: "assistant",
+                content: DEMO_BOT_REPLY,
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          });
+          setSuggestions(DEMO_SUGGESTIONS);
+        } finally {
+          setIsLoading(false);
+          onActivity?.();
+        }
+      }
+    );
+  } catch (err) {
+    setIsLoading(false);
+  }
+}, [input, isLoading, messages, user, pathname, onActivity]);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -233,7 +296,25 @@ function ChatWindow({ onClose, onActivity }) {
               ⧖
             </button>
           )}
-          <button type="button" className="cb-icon-btn" onClick={() => { setMessages([]); setSuggestions([]); setInput(""); }} title="Clear" aria-label="Clear conversation">⊘</button>
+          <button
+              type="button"
+              className="cb-icon-btn cb-new-chat-btn"
+              onClick={async () => {
+                if (user?.accessToken) {
+                  const newId = await createChatSession(user.accessToken);
+                  setSessionId(newId);
+                } else {
+                  setSessionId(null);
+                }
+                setMessages([]);
+                setSuggestions([]);
+                setInput("");
+              }}
+              title="New Chat"
+              aria-label="Start a new chat"
+            >
+              + New Chat
+          </button>
           {/* <button type="button" className="cb-icon-btn cb-icon-btn--close" onClick={onClose} aria-label="Close chat">✕</button> */}
         </div>
       </div>
@@ -261,6 +342,7 @@ function ChatWindow({ onClose, onActivity }) {
                   className="cb-history-item"
                   onClick={() => {
                     if (session.messages?.length) setMessages(session.messages);
+                    if (session.id) setSessionId(session.id);
                     setTab("chat");
                   }}
                 >
