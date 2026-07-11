@@ -1,0 +1,6002 @@
+================================================================================
+START OF FOLDER: Calculus-AI-Chatbot
+================================================================================
+
+================================================================================
+PROJECT STRUCTURE
+================================================================================
+Root: U:\Technical Mastery\AI Intern\9-July\Calculus-AI-Chatbot
+
+Calculus-AI-Chatbot/
+├── .git/  [skipped]
+├── aiService/
+│   ├── services/
+│   │   └── llm_client.py
+│   ├── tests/
+│   │   ├── calculus_questions.json
+│   │   ├── chatbot_tests.py
+│   │   ├── README_TESTING.md
+│   │   ├── test_cb12_feedback.py
+│   │   └── test_streaming_latency.py
+│   ├── chatbot.py
+│   ├── readme.md
+│   └── requirements.txt
+├── backend/
+│   ├── app/
+│   │   ├── auth/
+│   │   │   ├── __init__.py
+│   │   │   └── auth_utils.py
+│   │   ├── database/
+│   │   │   └── db.py
+│   │   ├── routes/
+│   │   │   ├── __init__.py
+│   │   │   └── chat.py
+│   │   ├── __init__.py
+│   │   └── main.py
+│   ├── __init__.py
+│   └── requirements.txt
+├── frontend/
+│   ├── public/
+│   │   └── index.html
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Chatbot/
+│   │   │   │   ├── Chatbot.css
+│   │   │   │   ├── Chatbot.jsx
+│   │   │   │   ├── ChatWindow.jsx
+│   │   │   │   ├── Icons.jsx
+│   │   │   │   ├── MathSymbolPicker.jsx
+│   │   │   │   ├── Message.jsx
+│   │   │   │   ├── ProblemTracker.jsx
+│   │   │   │   └── SuggestedQuestions.jsx
+│   │   │   ├── Dashboard/
+│   │   │   │   ├── Dashboard.css
+│   │   │   │   └── Dashboard.jsx
+│   │   │   └── Layout.jsx
+│   │   ├── context/
+│   │   │   └── AuthContext.js
+│   │   ├── services/
+│   │   │   └── chatApi.js
+│   │   ├── utils/
+│   │   │   └── routeContext.js
+│   │   ├── App.js
+│   │   ├── index.css
+│   │   ├── index.js
+│   │   └── main.jsx
+│   ├── index.html
+│   ├── package-lock.json
+│   ├── package.json
+│   └── vite.config.js
+├── .gitignore
+└── README.md
+
+Total files: 43
+
+================================================================================
+FILE CONTENTS
+================================================================================
+
+--------------------------------------------------------------------------------
+FILE: /aiService/services/llm_client.py
+--------------------------------------------------------------------------------
+import os
+import logging
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+
+# Load .env file
+load_dotenv("aiService/services/.env")
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+# Toggle between mock and OpenAI
+USE_MOCK = True
+# ─────────────────────────────────────────────────────────────
+# CAL SYSTEM PROMPT — v3
+# Designed by: AI & Prompt Engineering (Team Theta)
+# ─────────────────────────────────────────────────────────────
+
+CAL_SYSTEM_PROMPT = """
+You are Cal, a friendly and knowledgeable calculus tutor for
+CalcVoyager — an interactive learning platform focused on
+multivariable calculus. Your sole purpose is to help students
+deeply understand calculus concepts, not simply obtain answers.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IDENTITY & TONE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Your name is Cal.
+- You are patient, encouraging, and academically rigorous.
+- You speak like a knowledgeable peer — clear, warm, and precise.
+- You never make a student feel bad for not understanding something.
+- You celebrate correct reasoning, not just correct answers.
+- Your tone does not change based on the student's frustration
+  level or behavior. Patience is unconditional. Your fifth
+  explanation of the same concept is as warm as your first.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INTERNAL REASONING PROTOCOL (CHAIN-OF-THOUGHT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Before producing any response visible to the student, privately
+reason through this checklist inside a <scratchpad> block.
+The scratchpad is NEVER shown to the student.
+
+<scratchpad>
+STEP A — Classify the input:
+  [ ] Conceptual question    → Template 1
+  [ ] Problem-solving        → Template 2
+  [ ] Confusion              → Template 3
+  [ ] Answer evaluation      → Template 4
+  [ ] Off-topic              → Template 5
+  [ ] Ambiguous              → ask ONE clarifying question
+
+STEP B — Check scope:
+  [ ] In scope               → proceed
+  [ ] Adjacent               → bridge only
+  [ ] Out of scope           → decline warmly
+
+STEP C — Verify the math (problem-solving only):
+  Work through the full solution privately before writing
+  a single student-facing step. Verify the final answer.
+  Only after verifying: write the student response.
+
+STEP D — Plan the LaTeX:
+  List every expression needing LaTeX formatting.
+  Confirm each uses $...$ or $$...$$ correctly.
+
+STEP E — Check response structure:
+  Steps numbered and verb-labeled?
+  Final answer in display LaTeX?
+  Interpretation sentence present?
+  Comprehension check or follow-up present?
+
+STEP F — Generate follow-ups:
+  Draft 3 suggestions. Check each against 4 rules:
+  - Specific to THIS response?           [ ]
+  - Progressively deeper?                [ ]
+  - Conversational phrasing?             [ ]
+  - Not repeating what was just shown?   [ ]
+</scratchpad>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCOPE — WHAT YOU COVER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You only answer questions related to:
+- Limits and continuity
+- Partial derivatives
+- Gradients and directional derivatives
+- Multiple integrals (double and triple)
+- Vector calculus (divergence, curl, vector fields)
+- Lagrange multipliers and constrained optimization
+- Chain rule for multivariable functions
+- Taylor series and linearization
+
+Out of scope:
+"That's a bit outside what I cover here on CalcVoyager, but
+let's get back to [current topic] — I think you'll find it
+connects nicely."
+
+Entirely unrelated:
+"I'm Cal, your calculus tutor — that one's outside my expertise!
+If you have any calculus questions, I'm all yours."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEACHING STYLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use a blend of Socratic guidance and direct explanation:
+- Student stuck or confused → ask a guiding question first
+- Student asks for a walkthrough → explain step by step
+- Student shows partial understanding → affirm what is right,
+  then guide through what is missing
+- Never hand over a final answer without explanation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MATHEMATICAL FORMATTING — LATEX RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ALL mathematical expressions must be in LaTeX. No exceptions.
+
+- Inline:  $expression$
+- Display: $$expression$$
+- Use display format for key steps, final results, definitions.
+
+NEVER write: "the derivative is 2x"
+ALWAYS write: "the derivative is $2x$"
+Even single variables: not x, but $x$. Not f(x,y), but $f(x,y)$.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RESPONSE STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONCEPTUAL QUESTION:
+1. Intuitive hook (1-2 sentences, plain language)
+2. Formal definition in display LaTeX
+3. Worked example with numbered verb-labeled steps
+4. Comprehension check
+
+PROBLEM-SOLVING:
+1. Restate the problem
+2. Name the method
+3. Numbered verb-labeled steps with intermediate LaTeX
+4. Final answer in boxed display LaTeX
+5. One sentence interpreting what the answer means
+6. Follow-up invitation
+
+Step label format:
+WRONG:   "Step 1: 6xy"
+CORRECT: "Step 1 — Differentiate with respect to $x$,
+          treating $y$ as constant:
+          $$\\frac{\\partial f}{\\partial x} = 6xy$$"
+
+Length limits:
+- Simple computation:  150 words max
+- Conceptual:          250 words max
+- Full walkthrough:    400 words max — no exceptions
+
+After every final answer: one sentence interpreting the result.
+This is mandatory — a number without meaning is not complete.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FOLLOW-UP SUGGESTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+End every substantive response with:
+
+[FOLLOW_UPS]
+1. [Specific contextual question]
+2. [Slightly deeper or related question]
+3. [Application or example-based question]
+[/FOLLOW_UPS]
+
+Suggestions must be specific to THIS response only.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PAGE CONTEXT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You may receive a page context tag:
+[PAGE CONTEXT: Partial Derivatives — Part 2]
+
+When present:
+- Assume questions relate to that topic
+- Tailor examples accordingly
+- Use it to resolve vague questions like "I don't get this"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THINGS YOU MUST NEVER DO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Give a final answer without showing full working
+- Write math in plain text
+- Answer questions unrelated to calculus
+- Be dismissive or impatient
+- Fabricate theorems or results
+- Work backwards from a result — always derive forward
+- Write walls of text
+"""
+# Create OpenAI client
+client = AsyncOpenAI(
+    api_key=os.getenv("GROK_API_KEY"),
+    base_url="https://api.x.ai/v1"
+)
+
+
+async def ask_mock(
+    message: str,
+    topic: str = "",
+    history: list = None
+):
+    """
+    Mock AI response for testing without OpenAI.
+    """
+
+    if history is None:
+        history = []
+
+    return f"""
+Mock AI Response
+
+Topic: {topic}
+
+Question:
+{message}
+
+History Length:
+{len(history)} messages
+
+This is a placeholder response.
+OpenAI integration will be used when USE_MOCK=False.
+"""
+
+
+async def ask_openai(
+    message: str,
+    topic: str = "",
+    history: list = None
+):
+    """
+    Send request to OpenAI.
+    """
+
+    if history is None:
+        history = []
+
+    messages = []
+     # ── System prompt — Cal's brain ─────────────────────────
+    system_content = CAL_SYSTEM_PROMPT
+    if topic:
+        system_content += f"\n\n[PAGE CONTEXT: {topic}]"
+    messages.append({
+        "role": "system",
+        "content": system_content
+    })
+
+    # ── Conversation history (last 10 turns max) ─────────────
+    history = history[-10:] if len(history) > 10 else history
+    # Previous conversation
+    for item in history:
+
+        messages.append(
+            {
+                "role": item["role"],
+                "content": item["content"]
+            }
+        )
+
+    # Current user message
+    messages.append(
+        {
+            "role": "user",
+            "content": message
+        }
+    )
+
+    response = await client.chat.completions.create(
+        model="grok-3-mini",
+        messages=messages,
+        temperature=0.3,
+        max_tokens=1000
+    )
+
+    response_content = response.choices[0].message.content
+    
+    # CB-8: Scope violation detection
+    calculus_keywords = [
+        "derivative", "integral", "gradient", "limit", "vector",
+        "lagrange", "taylor", "partial", "curl", "divergence",
+        "multivariable", "calculus", "differentiate", "integrate"
+    ]
+    
+    has_calculus_keyword = any(kw in message.lower() for kw in calculus_keywords)
+    has_cal_refusal = "I'm Cal" in response_content
+    
+    if not has_cal_refusal and not has_calculus_keyword:
+        logging.warning(f"SCOPE_VIOLATION: possible off-topic response for message: {message[:80]}")
+    
+    return response_content
+
+
+
+async def ask_mock_stream(
+    message: str,
+    topic: str = "",
+    history: list = None
+):
+    """
+    Streaming version of the mock response, for testing without
+    burning OpenAI/Grok API credits. Yields word-by-word.
+    """
+    import asyncio
+
+    if history is None:
+        history = []
+
+    full_text = (
+        f"Mock streamed response. Topic: {topic or 'general'}. "
+        f"You asked: {message}. "
+        f"History length: {len(history)} messages. "
+        f"This is a placeholder streamed response simulating real token output."
+    )
+
+    for word in full_text.split(" "):
+        yield word + " "
+        await asyncio.sleep(0.03)
+
+
+async def ask_openai_stream(
+    message: str,
+    topic: str = "",
+    history: list = None
+):
+    """
+    Streaming version of ask_openai.
+    Yields text chunks (tokens) as they arrive from the model,
+    instead of waiting for the full completion.
+    """
+    if history is None:
+        history = []
+
+    messages = []
+    # ── System prompt — Cal's brain ─────────────────────────
+    system_content = CAL_SYSTEM_PROMPT
+    if topic:
+        system_content += f"\n\n[PAGE CONTEXT: {topic}]"
+    messages.append({
+        "role": "system",
+        "content": system_content
+    })
+
+    # ── Conversation history (last 10 turns max) ─────────────
+    history = history[-10:] if len(history) > 10 else history
+    for item in history:
+        messages.append(
+            {
+                "role": item["role"],
+                "content": item["content"]
+            }
+        )
+
+    # Current user message
+    messages.append(
+        {
+            "role": "user",
+            "content": message
+        }
+    )
+
+    stream = await client.chat.completions.create(
+        model="grok-3-mini",
+        messages=messages,
+        temperature=0.3,
+        max_tokens=1000,
+        stream=True,
+    )
+
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
+async def ask_llm_stream(
+    message: str,
+    topic: str = "",
+    history: list = None
+):
+    """
+    Streaming counterpart to ask_llm.
+    Switches between mock and real streaming based on USE_MOCK,
+    same pattern as the existing non-streaming ask_llm().
+    """
+    if USE_MOCK:
+        async for chunk in ask_mock_stream(message, topic, history):
+            yield chunk
+    else:
+        async for chunk in ask_openai_stream(message, topic, history):
+            yield chunk
+
+
+async def ask_llm(
+    message: str,
+    topic: str = "",
+    history: list = None
+):
+    """
+    Main function used by chatbot.py.
+    Switches between mock and OpenAI.
+    """
+
+    if USE_MOCK:
+
+        return await ask_mock(
+            message,
+            topic,
+            history
+        )
+
+    return await ask_openai(
+        message,
+        topic,
+        history
+    )
+
+
+--------------------------------------------------------------------------------
+FILE: /aiService/tests/calculus_questions.json
+--------------------------------------------------------------------------------
+{
+  "test_suite": "CalcVoyager System Prompt Acceptance Test",
+  "description": "CB-2: 20 calculus questions spanning all scope topics",
+  "questions": [
+    {
+      "id": 1,
+      "topic": "limits",
+      "question": "What is the limit of (x² - 4)/(x - 2) as x approaches 2?",
+      "answer_key": ["x + 2", "4"]
+    },
+    {
+      "id": 2,
+      "topic": "limits",
+      "question": "Explain what it means for a limit to exist at a point.",
+      "answer_key": ["L", "\\lim"]
+    },
+    {
+      "id": 3,
+      "topic": "continuity",
+      "question": "Is the function f(x,y) = xy/(x² + y²) continuous at the origin?",
+      "answer_key": ["path", "discontinuous"]
+    },
+    {
+      "id": 4,
+      "topic": "continuity",
+      "question": "What are the three conditions for a function to be continuous at a point?",
+      "answer_key": ["f(a)", "\\lim", "defined"]
+    },
+    {
+      "id": 5,
+      "topic": "partial_derivatives",
+      "question": "Find the partial derivative ∂f/∂x for f(x,y) = x³y² + 2xy.",
+      "answer_key": ["3x^2y^2", "2y", "\\frac{\\partial f}{\\partial x}"]
+    },
+    {
+      "id": 6,
+      "topic": "partial_derivatives",
+      "question": "What does the partial derivative ∂f/∂y represent geometrically?",
+      "answer_key": ["\\frac{\\partial f}{\\partial y}", "slope", "constant"]
+    },
+    {
+      "id": 7,
+      "topic": "partial_derivatives",
+      "question": "Calculate all second-order partial derivatives for f(x,y) = e^(xy).",
+      "answer_key": ["e^{xy}", "\\frac{\\partial^2 f}{\\partial x^2}"]
+    },
+    {
+      "id": 8,
+      "topic": "gradients",
+      "question": "Find the gradient of f(x,y,z) = x²y + yz² at the point (1,2,1).",
+      "answer_key": ["\\nabla f", "4", "2", "\\langle"]
+    },
+    {
+      "id": 9,
+      "topic": "gradients",
+      "question": "Explain the geometric meaning of the gradient vector.",
+      "answer_key": ["perpendicular", "\\nabla f", "steepest"]
+    },
+    {
+      "id": 10,
+      "topic": "directional_derivatives",
+      "question": "How do you find the directional derivative of f in the direction of vector v?",
+      "answer_key": ["D_\\mathbf{u}", "\\nabla f", "\\cdot"]
+    },
+    {
+      "id": 11,
+      "topic": "chain_rule",
+      "question": "Use the chain rule to find dz/dt where z = x²y, x = cos(t), y = sin(t).",
+      "answer_key": ["\\frac{dz}{dt}", "\\cos", "\\sin"]
+    },
+    {
+      "id": 12,
+      "topic": "chain_rule",
+      "question": "Explain the multivariable chain rule for z = f(x,y) where x = g(t) and y = h(t).",
+      "answer_key": ["\\frac{dz}{dt}", "\\frac{\\partial f}{\\partial x}", "\\frac{dx}{dt}"]
+    },
+    {
+      "id": 13,
+      "topic": "multiple_integrals",
+      "question": "Evaluate the double integral ∫∫ xy dA over the rectangle [0,2] × [0,3].",
+      "answer_key": ["9", "\\int_0^2", "\\int_0^3"]
+    },
+    {
+      "id": 14,
+      "topic": "multiple_integrals",
+      "question": "What is the geometric interpretation of a double integral?",
+      "answer_key": ["volume", "\\iint"]
+    },
+    {
+      "id": 15,
+      "topic": "vector_calculus",
+      "question": "Calculate the divergence of the vector field F = ⟨x², y², z²⟩.",
+      "answer_key": ["\\nabla \\cdot", "2x", "2y", "2z"]
+    },
+    {
+      "id": 16,
+      "topic": "vector_calculus",
+      "question": "Find the curl of F = ⟨y, -x, z⟩ and explain what it represents.",
+      "answer_key": ["\\nabla \\times", "curl", "rotation"]
+    },
+    {
+      "id": 17,
+      "topic": "lagrange_multipliers",
+      "question": "Use Lagrange multipliers to find the maximum of f(x,y) = xy subject to x² + y² = 1.",
+      "answer_key": ["\\lambda", "\\frac{1}{2}", "\\nabla f", "\\nabla g"]
+    },
+    {
+      "id": 18,
+      "topic": "lagrange_multipliers",
+      "question": "Explain when and why we use Lagrange multipliers for optimization.",
+      "answer_key": ["\\lambda", "constraint", "\\nabla f"]
+    },
+    {
+      "id": 19,
+      "topic": "taylor_series",
+      "question": "Find the second-order Taylor polynomial for f(x,y) = e^(x+y) at (0,0).",
+      "answer_key": ["1 + x + y", "\\frac{1}{2}", "x^2"]
+    },
+    {
+      "id": 20,
+      "topic": "taylor_series",
+      "question": "What is the purpose of linearization in multivariable calculus?",
+      "answer_key": ["linear approximation", "\\nabla f", "tangent plane"]
+    }
+  ]
+}
+
+
+--------------------------------------------------------------------------------
+FILE: /aiService/tests/chatbot_tests.py
+--------------------------------------------------------------------------------
+"""
+CB-2 Acceptance Test Suite
+Tests the CalcVoyager system prompt against 20 calculus questions.
+
+Validates:
+- LaTeX formatting is present ($ delimiters)
+- Follow-up suggestions are included ([FOLLOW_UPS] block)
+- Response length is within limits (400 words max for walkthroughs)
+- Math expressions are properly formatted
+
+Does NOT validate:
+- Mathematical correctness (requires domain expert review)
+- Pedagogical quality (requires user testing)
+"""
+
+import asyncio
+import json
+import re
+from pathlib import Path
+
+from aiService.services.llm_client import ask_llm
+
+# Test configuration
+QUESTIONS_FILE = Path(__file__).parent / "calculus_questions.json"
+OUTPUT_FILE = Path(__file__).parent / "test_results.json"
+
+
+class TestResult:
+    """Test result for a single question"""
+    def __init__(self, question_id, topic, question):
+        self.question_id = question_id
+        self.topic = topic
+        self.question = question
+        self.response = ""
+        self.passed = False
+        self.checks = {}
+        self.word_count = 0
+        self.errors = []
+        self.scope_enforcement = None  # CB-8: only set for off-topic tests
+        self.correctness_score = None   # CB-9: answer key matching score
+    
+    def to_dict(self):
+        result_dict = {
+            "question_id": self.question_id,
+            "topic": self.topic,
+            "question": self.question,
+            "response_preview": self.response[:200] + "..." if len(self.response) > 200 else self.response,
+            "word_count": self.word_count,
+            "passed": self.passed,
+            "checks": self.checks,
+            "errors": self.errors
+        }
+        if self.scope_enforcement is not None:
+            result_dict["scope_enforcement"] = self.scope_enforcement
+        if self.correctness_score is not None:
+            result_dict["correctness_score"] = self.correctness_score
+        return result_dict
+
+
+def check_latex_formatting(response: str) -> tuple[bool, str]:
+    """Check if response contains LaTeX math expressions"""
+    inline_latex = re.findall(r'\$[^$]+\$', response)
+    display_latex = re.findall(r'\$\$[^$]+\$\$', response)
+    
+    if inline_latex or display_latex:
+        return True, f"Found {len(inline_latex)} inline + {len(display_latex)} display LaTeX expressions"
+    return False, "No LaTeX math expressions found"
+
+
+def check_follow_ups(response: str) -> tuple[bool, str]:
+    """Check if response contains [FOLLOW_UPS] block"""
+    pattern = r'\[FOLLOW_UPS\](.*?)\[/FOLLOW_UPS\]'
+    match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
+    
+    if not match:
+        return False, "No [FOLLOW_UPS] block found"
+    
+    follow_ups_text = match.group(1).strip()
+    suggestions = [line for line in follow_ups_text.split('\n') if line.strip()]
+    
+    if len(suggestions) >= 3:
+        return True, f"Found {len(suggestions)} follow-up suggestions"
+    return False, f"Only {len(suggestions)} suggestions found (expected 3)"
+
+
+def check_word_count(response: str) -> tuple[bool, str]:
+    """Check if response is within reasonable length"""
+    words = response.split()
+    word_count = len(words)
+    
+    if word_count > 450:
+        return False, f"Response too long: {word_count} words (max 400 for walkthroughs)"
+    elif word_count < 20:
+        return False, f"Response too short: {word_count} words"
+    return True, f"{word_count} words (acceptable)"
+
+
+def check_step_formatting(response: str) -> tuple[bool, str]:
+    """Check for proper step labeling in problem-solving responses"""
+    # Look for step patterns: "Step 1", "Step 1:", "Step 1 —", etc.
+    step_pattern = r'Step\s+\d+[\s:—\-]'
+    steps = re.findall(step_pattern, response, re.IGNORECASE)
+    
+    if steps:
+        return True, f"Found {len(steps)} numbered steps"
+    # Not all responses need steps (conceptual Q&A), so this is informational
+    return True, "No numbered steps (may be conceptual explanation)"
+
+
+# ============================================================================
+# CB-8: Hallucination Guardrails & Scope Enforcement
+# ============================================================================
+
+OFF_TOPIC_QUESTIONS = [
+    "Who was the first president of the United States?",
+    "Write a Python function to sort a list of numbers.",
+    "What is the capital of France?",
+    "Explain the causes of World War II.",
+    "How do I make chocolate chip cookies?",
+    "What is the meaning of life?",
+    "Tell me about the solar system.",
+    "Who invented the telephone?",
+    "What is photosynthesis?",
+    "Explain how blockchain technology works."
+]
+
+
+def check_scope_enforcement(response: str) -> tuple[bool, str]:
+    """
+    Check if Cal properly refuses off-topic questions.
+    Returns (True, reason) if refusal detected.
+    Returns (False, reason) if response appears to answer the off-topic question.
+    """
+    refusal_phrases = [
+        "I'm Cal",
+        "outside my expertise",
+        "outside what I cover",
+        "calculus tutor",
+        "CalcVoyager"
+    ]
+    has_refusal = any(phrase in response for phrase in refusal_phrases)
+    has_stepbystep = bool(re.search(r'Step\s+\d+[\s:—\-]', response))
+    
+    if has_refusal and not has_stepbystep:
+        return True, "Proper refusal detected"
+    if has_stepbystep:
+        return False, "Response contains step-by-step math (scope violation)"
+    return False, "No refusal phrase detected"
+
+
+async def run_scope_enforcement_suite() -> bool:
+    """
+    CB-8: Test that Cal refuses off-topic questions.
+    Returns True if all 10 questions are properly refused.
+    """
+    print("=" * 60)
+    print("CB-8: Scope Enforcement Test")
+    print("Testing Cal's refusal of off-topic questions")
+    print("=" * 60)
+    print()
+    
+    results = []
+    
+    for i, question in enumerate(OFF_TOPIC_QUESTIONS, 1):
+        print(f"[{i}/10] Testing: {question[:50]}...")
+        
+        try:
+            response = await ask_llm(
+                message=question,
+                topic="",
+                history=[]
+            )
+            
+            refused, reason = check_scope_enforcement(response)
+            results.append(refused)
+            
+            status = "✓ REFUSED" if refused else "✗ ANSWERED"
+            print(f"  {status} - {reason}")
+            
+            if not refused:
+                print(f"    Response preview: {response[:100]}...")
+        
+        except Exception as e:
+            print(f"  ✗ ERROR: {str(e)}")
+            results.append(False)
+        
+        print()
+    
+    # Summary
+    score = sum(results)
+    print("=" * 60)
+    print(f"SCOPE ENFORCEMENT: {score}/10 refused correctly")
+    print("=" * 60)
+    print()
+    
+    if score == 10:
+        print("✓ CB-8 ACCEPTANCE: MET")
+        print("  Cal successfully refuses all off-topic questions")
+    else:
+        print("✗ CB-8 ACCEPTANCE: NOT MET")
+        print(f"  Cal should refuse all 10 questions (refused {score}/10)")
+    
+    print()
+    # Save CB-8 results to a separate file
+    scope_output = {
+        "test": "CB-8 Scope Enforcement",
+        "score": f"{score}/10",
+        "passed": score == 10,
+        "results": [
+            {"question": q, "refused": r}
+            for q, r in zip(OFF_TOPIC_QUESTIONS, results)
+        ]
+    }
+    scope_file = Path(__file__).parent / "scope_results.json"
+    with open(scope_file, 'w', encoding='utf-8') as f:
+        json.dump(scope_output, f, indent=2)
+    print(f"Scope results saved to: {scope_file}")
+    return score == 10
+
+
+# ============================================================================
+# CB-9: Response Quality Evaluation Suite
+# ============================================================================
+
+def check_answer_key(response: str, expected_fragments: list[str]) -> tuple[bool, str, float]:
+    """
+    Check what fraction of expected LaTeX fragments appear in the response.
+    Returns (passed, detail_string, score) where:
+      - passed: True if score >= 0.6
+      - detail_string: human-readable summary
+      - score: float from 0.0 to 1.0
+    """
+    if not expected_fragments:
+        return True, "No answer key provided", 1.0
+    
+    matched = 0
+    missing = []
+    
+    for fragment in expected_fragments:
+        # Case-sensitive substring match (LaTeX is case-sensitive)
+        if fragment in response:
+            matched += 1
+        else:
+            missing.append(fragment)
+    
+    score = matched / len(expected_fragments)
+    passed = score >= 0.6
+    
+    detail = f"{matched}/{len(expected_fragments)} fragments found (score: {score:.2f})"
+    if missing:
+        detail += f" - Missing: {', '.join(missing[:3])}"
+        if len(missing) > 3:
+            detail += f" and {len(missing) - 3} more"
+    
+    return passed, detail, score
+
+
+async def test_question(question_data: dict) -> TestResult:
+    """Test a single question"""
+    result = TestResult(
+        question_id=question_data['id'],
+        topic=question_data['topic'],
+        question=question_data['question']
+    )
+    
+    try:
+        # Ask the LLM
+        response = await ask_llm(
+            message=result.question,
+            topic=result.topic,
+            history=[]
+        )
+        
+        result.response = response
+        result.word_count = len(response.split())
+        
+        # Run checks
+        result.checks['latex_formatting'] = check_latex_formatting(response)
+        result.checks['follow_ups'] = check_follow_ups(response)
+        result.checks['word_count'] = check_word_count(response)
+        result.checks['step_formatting'] = check_step_formatting(response)
+        
+        # CB-9: Check answer key if present
+        if 'answer_key' in question_data and question_data['answer_key']:
+            passed_key, detail_key, score_key = check_answer_key(
+                response, 
+                question_data['answer_key']
+            )
+            result.checks['answer_key'] = (passed_key, detail_key)
+            result.correctness_score = score_key
+        
+        # Determine pass/fail
+        critical_checks = ['latex_formatting', 'follow_ups', 'word_count']
+        all_critical_passed = all(
+            result.checks[check][0] for check in critical_checks
+        )
+        
+        result.passed = all_critical_passed
+        
+        if not result.passed:
+            result.errors = [
+                f"{check}: {result.checks[check][1]}"
+                for check in critical_checks
+                if not result.checks[check][0]
+            ]
+    
+    except Exception as e:
+        result.passed = False
+        result.errors = [f"Exception: {str(e)}"]
+    
+    return result
+
+
+async def run_test_suite():
+    """Run all 20 questions through the system prompt"""
+    print("=" * 60)
+    print("CB-2: CalcVoyager Acceptance Test")
+    print("Testing system prompt against 20 calculus questions")
+    print("=" * 60)
+    print()
+    
+    # Load questions
+    with open(QUESTIONS_FILE, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    questions = data['questions']
+    results = []
+    
+    # Test each question
+    for i, question_data in enumerate(questions, 1):
+        print(f"[{i}/20] Testing: {question_data['topic']} - Q{question_data['id']}")
+        print(f"  Question: {question_data['question'][:70]}...")
+        
+        result = await test_question(question_data)
+        results.append(result)
+        
+        status = "✓ PASS" if result.passed else "✗ FAIL"
+        print(f"  {status} - {result.word_count} words")
+        
+        if not result.passed:
+            for error in result.errors:
+                print(f"    ⚠ {error}")
+        
+        # CB-9: Show correctness score if available
+        if result.correctness_score is not None and result.correctness_score > 0:
+            print(f"  Correctness: {result.correctness_score:.2f}")
+        
+        print()
+    
+    # Summary
+    passed_count = sum(1 for r in results if r.passed)
+    print("=" * 60)
+    print(f"CB-2 RESULTS: {passed_count}/{len(results)} tests passed")
+    print("=" * 60)
+    print()
+    
+    # Detailed check breakdown
+    print("Check Breakdown:")
+    checks_summary = {
+        'latex_formatting': 0,
+        'follow_ups': 0,
+        'word_count': 0,
+        'step_formatting': 0
+    }
+    
+    for result in results:
+        for check_name in checks_summary.keys():
+            if result.checks.get(check_name, (False, ""))[0]:
+                checks_summary[check_name] += 1
+    
+    for check_name, count in checks_summary.items():
+        print(f"  {check_name}: {count}/{len(results)}")
+    
+    print()
+    
+    # CB-9: Correctness evaluation
+    print("=" * 60)
+    print("CB-9: Response Quality Evaluation")
+    print("=" * 60)
+    print()
+    
+    correctness_results = [r for r in results if r.correctness_score > 0]
+    if correctness_results:
+        print("Correctness Scores (answer key matching):")
+        for result in correctness_results:
+            status_icon = "✓" if result.correctness_score >= 0.6 else "✗"
+            print(f"  Q{result.question_id:2d}: {status_icon} {result.correctness_score:.2f}")
+        
+        print()
+        correct_count = sum(1 for r in correctness_results if r.correctness_score >= 0.6)
+        total_with_keys = len(correctness_results)
+        print(f"Overall Correctness: {correct_count}/{total_with_keys} questions with score >= 0.6")
+        print()
+        
+        # CB-9 acceptance criteria: >= 16/20 (80%)
+        cb9_met = correct_count >= 16
+        if cb9_met:
+            print("✓ CB-9 ACCEPTANCE: MET")
+            print("  Response quality meets accuracy threshold")
+        else:
+            print("✗ CB-9 ACCEPTANCE: NOT MET")
+            print(f"  Need at least 16/20 correct (got {correct_count}/{total_with_keys})")
+    else:
+        print("No answer keys found in questions - CB-9 evaluation skipped")
+        cb9_met = False
+    
+    print()
+    
+    # Save results to file
+    output_data = {
+        "test_suite": data["test_suite"],
+        "total_questions": len(results),
+        "passed": passed_count,
+        "failed": len(results) - passed_count,
+        "pass_rate": f"{(passed_count/len(results)*100):.1f}%",
+        "checks_summary": checks_summary,
+        "correctness_met": cb9_met if correctness_results else None,
+        "results": [r.to_dict() for r in results]
+    }
+    
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+        json.dump(output_data, f, indent=2, ensure_ascii=False)
+    
+    print(f"Detailed results saved to: {OUTPUT_FILE}")
+    print()
+    
+    # Acceptance criteria
+    if passed_count >= 18:  # 90% pass rate
+        print("✓ CB-2 ACCEPTANCE CRITERIA MET")
+        print("  System prompt performs well across all topic areas")
+    else:
+        print("✗ CB-2 ACCEPTANCE CRITERIA NOT MET")
+        print(f"  Need at least 18/20 passing (got {passed_count}/20)")
+        print("  Review failed tests and refine system prompt")
+    
+    return passed_count >= 18, cb9_met
+
+
+if __name__ == "__main__":
+    async def main():
+        """Run all test suites: CB-2, CB-8, CB-9"""
+        print()
+        print("╔" + "═" * 58 + "╗")
+        print("║" + " " * 10 + "CalcVoyager Test Suite Execution" + " " * 15 + "║")
+        print("║" + " " * 12 + "CB-2, CB-8, CB-9 Combined" + " " * 20 + "║")
+        print("╚" + "═" * 58 + "╝")
+        print()
+        
+        # Run CB-2: System prompt acceptance test
+        cb2_passed, cb9_passed = await run_test_suite()
+        
+        print()
+        
+        # Run CB-8: Scope enforcement test
+        cb8_passed = await run_scope_enforcement_suite()
+        
+        # Combined summary
+        print()
+        print("=" * 60)
+        print("COMBINED TEST SUMMARY")
+        print("=" * 60)
+        print(f"CB-2 (System Prompt):      {'✓ PASS' if cb2_passed else '✗ FAIL'}")
+        print(f"CB-8 (Scope Enforcement):  {'✓ PASS' if cb8_passed else '✗ FAIL'}")
+        print(f"CB-9 (Quality Evaluation): {'✓ PASS' if cb9_passed else '✗ FAIL'}")
+        print("=" * 60)
+        print()
+        
+        all_passed = cb2_passed and cb8_passed and cb9_passed
+        if all_passed:
+            print("🎉 ALL ACCEPTANCE CRITERIA MET")
+        else:
+            print("⚠ SOME CRITERIA NOT MET - Review failed tests above")
+        print()
+    
+    asyncio.run(main())
+
+
+--------------------------------------------------------------------------------
+FILE: /aiService/tests/README_TESTING.md
+--------------------------------------------------------------------------------
+# CalcVoyager Test Suite - Quick Start Guide
+
+## Running the Tests
+
+# 1. Set USE_MOCK = False in llm_client.py
+# 2. Make sure GROK_API_KEY is set in aiService/services/.env
+# 3. From the project root:
+
+python -m aiService.tests.chatbot_tests
+### 1. Prerequisites
+
+Before running tests, ensure:
+
+```bash
+# 1. Install dependencies
+pip install -r aiService/requirements.txt
+
+# 2. Configure environment
+# Edit aiService/services/.env and add:
+GROK_API_KEY=xai-your-actual-key-here
+
+# 3. Enable real API testing
+# Edit aiService/services/llm_client.py line 12:
+USE_MOCK = False  # Change from True to False
+```
+
+### 2. Execute All Tests
+
+From the project root directory:
+
+```bash
+python -m aiService.tests.chatbot_tests
+```
+
+This will run all three test objectives:
+- **CB-2**: System prompt validation (20 calculus questions)
+- **CB-8**: Scope enforcement (10 off-topic questions)
+- **CB-9**: Response quality evaluation (answer key matching)
+
+### 3. Expected Output
+
+```
+╔══════════════════════════════════════════════════════════╗
+║          CalcVoyager Test Suite Execution               ║
+║            CB-2, CB-8, CB-9 Combined                    ║
+╚══════════════════════════════════════════════════════════╝
+
+============================================================
+CB-2: CalcVoyager Acceptance Test
+Testing system prompt against 20 calculus questions
+============================================================
+
+[1/20] Testing: limits - Q1
+  Question: What is the limit of (x² - 4)/(x - 2) as x approaches 2?...
+  ✓ PASS - 145 words
+  Correctness: 1.00
+
+[... 19 more questions ...]
+
+============================================================
+CB-2 RESULTS: 18/20 tests passed
+============================================================
+
+Check Breakdown:
+  latex_formatting: 20/20
+  follow_ups: 19/20
+  word_count: 20/20
+  step_formatting: 18/20
+
+============================================================
+CB-9: Response Quality Evaluation
+============================================================
+
+Correctness Scores (answer key matching):
+  Q 1: ✓ 1.00
+  Q 2: ✓ 0.67
+  [... more scores ...]
+
+Overall Correctness: 16/20 questions with score >= 0.6
+
+✓ CB-9 ACCEPTANCE: MET
+  Response quality meets accuracy threshold
+
+============================================================
+CB-8: Scope Enforcement Test
+Testing Cal's refusal of off-topic questions
+============================================================
+
+[1/10] Testing: Who was the first president of the United St...
+  ✓ REFUSED - Refusal phrase 'I'm Cal' detected
+
+[... 9 more questions ...]
+
+============================================================
+SCOPE ENFORCEMENT: 10/10 refused correctly
+============================================================
+
+✓ CB-8 ACCEPTANCE: MET
+  Cal successfully refuses all off-topic questions
+
+============================================================
+COMBINED TEST SUMMARY
+============================================================
+CB-2 (System Prompt):      ✓ PASS
+CB-8 (Scope Enforcement):  ✓ PASS
+CB-9 (Quality Evaluation): ✓ PASS
+============================================================
+
+🎉 ALL ACCEPTANCE CRITERIA MET
+```
+
+## Test Results
+
+Results are automatically saved to:
+```
+aiService/tests/test_results.json
+```
+
+This JSON file contains detailed information including:
+- Individual question responses (preview)
+- Check results for each question
+- Correctness scores
+- Word counts
+- Pass/fail status
+- Overall statistics
+
+## Interpreting Results
+
+### CB-2: System Prompt Validation
+- **Pass threshold**: 18/20 questions (90%)
+- **What it tests**: LaTeX formatting, follow-ups, word count, step formatting
+- **Why it matters**: Ensures Cal follows the system prompt structure
+
+### CB-8: Scope Enforcement
+- **Pass threshold**: 10/10 off-topic questions refused (100%)
+- **What it tests**: Cal's ability to refuse non-calculus questions
+- **Detection criteria**:
+  - Response contains "I'm Cal, your calculus tutor"
+  - Response does NOT contain step-by-step math solutions
+
+### CB-9: Response Quality Evaluation
+- **Pass threshold**: 16/20 questions with correctness >= 0.6 (80%)
+- **What it tests**: Mathematical accuracy via answer key matching
+- **Scoring method**: Fraction of expected LaTeX fragments found
+- **Example**: If answer_key = ["x + 2", "4", "$\\lim$"] and response contains 2/3, score = 0.67
+
+## Troubleshooting
+
+### Mock Mode Still Active
+**Symptom**: Tests run instantly with placeholder responses
+
+**Solution**:
+```python
+# In aiService/services/llm_client.py line 12:
+USE_MOCK = False  # Make sure this is False, not True
+```
+
+### API Key Error
+**Symptom**: "Authentication failed" or similar errors
+
+**Solution**:
+1. Check `.env` file location: `aiService/services/.env`
+2. Verify GROK_API_KEY is set correctly
+3. Ensure no extra spaces or quotes around the key
+
+### Import Errors
+**Symptom**: `ModuleNotFoundError: No module named 'openai'`
+
+**Solution**:
+```bash
+pip install -r aiService/requirements.txt
+```
+
+### Path Issues on Windows
+**Symptom**: File not found errors
+
+**Solution**: Run from project root directory:
+```bash
+cd "c:\Users\zaigh\Desktop\Qunatum Logics\Calculus\chatbot\Calculus-AI-Chatbot"
+python -m aiService.tests.chatbot_tests
+```
+
+## Cost Considerations
+
+- **Total API calls**: 30 (20 calculus + 10 off-topic)
+- **Model**: grok-3-mini
+- **Max tokens per call**: 1000
+- **Estimated cost**: Check xAI pricing for current rates
+
+To minimize costs during development:
+- Use `USE_MOCK = True` for code testing
+- Only set `USE_MOCK = False` for final validation
+
+## Monitoring Scope Violations
+
+During test execution, watch for WARNING logs:
+```
+WARNING:root:SCOPE_VIOLATION: possible off-topic response for message: Tell me about...
+```
+
+These warnings indicate Cal may have answered an off-topic question instead of refusing it. This helps identify system prompt weaknesses.
+
+## Next Steps After Testing
+
+1. **If tests fail**:
+   - Review `test_results.json` for detailed failure reasons
+   - Check which questions failed and why
+   - Consider refining the system prompt in `llm_client.py`
+   - Adjust answer keys if they're too strict
+
+2. **If tests pass**:
+   - Review scope violation warnings (if any)
+   - Consider adding more edge case questions
+   - Document any observed issues for future improvements
+   - Proceed with integration testing
+
+## Additional Test Files
+
+- **calculus_questions.json**: Contains 20 test questions with answer keys
+- **chatbot_tests.py**: Main test suite implementation
+- **test_results.json**: Generated output (git-ignored)
+
+## Support
+
+For questions about:
+- Test implementation: See IMPLEMENTATION_SUMMARY.md
+- System prompt design: See aiService/readme.md
+- API configuration: See aiService/services/.env (create if missing)
+
+
+--------------------------------------------------------------------------------
+FILE: /aiService/tests/test_cb12_feedback.py
+--------------------------------------------------------------------------------
+"""
+CB-12 · Feedback Endpoint Test Suite
+─────────────────────────────────────────────────────────────────────────────
+Tests POST /api/chat/feedback against all acceptance criteria.
+
+HOW IT WORKS — nothing in the existing project is touched:
+  - A minimal Starlette app is built here just for testing.
+  - An isolated in-memory SQLite DB is created fresh for each test.
+  - require_user is monkeypatched to simulate auth / guest states.
+  - The real submit_feedback, upsert_feedback, and get_feedback_for_message
+    functions from your actual files are imported and exercised.
+
+PLACE THIS FILE AT:
+  tests/test_cb12_feedback.py   (alongside chatbot_tests.py)
+
+RUN WITH:
+  pytest tests/test_cb12_feedback.py -v
+─────────────────────────────────────────────────────────────────────────────
+"""
+
+import json
+import sqlite3
+import sys
+import os
+import pytest
+
+# ── Path setup ────────────────────────────────────────────────────────────────
+# Allows imports to resolve the same way the rest of the project does.
+# Adjust if your project root is structured differently.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.testclient import TestClient
+from starlette.requests import Request
+
+# ── Imports from your actual code ─────────────────────────────────────────────
+import db as db_module
+import chat as chat_module
+from chat import submit_feedback, json_response
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TEST DATABASE SETUP
+# Each test gets a completely fresh in-memory SQLite database so tests
+# never interfere with each other or with the real calcvoyager.db.
+# ═════════════════════════════════════════════════════════════════════════════
+
+IN_MEMORY_DB = ":memory:"
+
+# We keep one shared connection open for the duration of the test session
+# because :memory: databases are destroyed when the last connection closes.
+_test_conn: sqlite3.Connection = None
+
+
+def _get_test_connection():
+    """Return the shared test connection (mimics db_module.get_connection)."""
+    global _test_conn
+    if _test_conn is None:
+        _test_conn = sqlite3.connect(IN_MEMORY_DB, check_same_thread=False)
+        _test_conn.row_factory = sqlite3.Row
+        _test_conn.execute("PRAGMA foreign_keys = ON")
+    return _test_conn
+
+
+def _reset_db():
+    """Drop and recreate all tables — called before each test."""
+    conn = _get_test_connection()
+    conn.executescript("""
+        DROP TABLE IF EXISTS message_feedback;
+        DROP TABLE IF EXISTS chat_messages;
+        DROP TABLE IF EXISTS chat_sessions;
+        DROP TABLE IF EXISTS users;
+    """)
+    # Minimal users table so FK references resolve
+    conn.executescript("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL
+        );
+    """ + db_module.CHAT_SCHEMA_SQL)
+    conn.commit()
+
+
+def _seed_db(user_id: int = 1, session_id: str = "test-session-uuid"):
+    """
+    Insert the minimum rows needed for feedback tests:
+      - one user
+      - one active session
+      - one assistant message (this is what gets liked/disliked)
+    Returns the message_id of the seeded assistant message.
+    """
+    conn = _get_test_connection()
+    conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)", (user_id, "testuser"))
+    conn.execute(
+        "INSERT INTO chat_sessions (user_id, session_id, title) VALUES (?, ?, ?)",
+        (user_id, session_id, "Test Session")
+    )
+    cursor = conn.execute(
+        "INSERT INTO chat_messages (user_id, session_id, message_type, content) "
+        "VALUES (?, ?, 'assistant', 'Here is your calculus answer.')",
+        (user_id, session_id)
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+# ── Patch db_module helpers to use the test connection ────────────────────────
+# We replace get_connection in db_module so every helper (execute, fetchone,
+# upsert_feedback, etc.) transparently uses the in-memory DB.
+
+async def _patched_execute(query: str, params: tuple = ()):
+    conn = _get_test_connection()
+    cursor = conn.execute(query, params)
+    conn.commit()
+    return cursor.lastrowid
+
+async def _patched_fetchone(query: str, params: tuple = ()):
+    conn = _get_test_connection()
+    cursor = conn.execute(query, params)
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+async def _patched_fetchall(query: str, params: tuple = ()):
+    conn = _get_test_connection()
+    cursor = conn.execute(query, params)
+    return [dict(r) for r in cursor.fetchall()]
+
+async def _patched_scalar(query: str, params: tuple = ()):
+    conn = _get_test_connection()
+    cursor = conn.execute(query, params)
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+# Apply patches
+db_module.execute  = _patched_execute
+db_module.fetchone = _patched_fetchone
+db_module.fetchall = _patched_fetchall
+db_module.scalar   = _patched_scalar
+
+# Patch the same names inside chat_module (it imported them at load time)
+chat_module.execute  = _patched_execute
+chat_module.fetchone = _patched_fetchone
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# AUTH HELPERS
+# require_user normally reads a JWT from the request. We replace it per-test
+# to simulate authenticated users and guests without any real tokens.
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _make_auth(user_id):
+    """Return a require_user that always authenticates as user_id."""
+    def _auth(request: Request):
+        return user_id
+    return _auth
+
+def _guest_auth(request: Request):
+    """Simulates a guest — require_user returns None."""
+    return None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MINIMAL TEST APP
+# Only the feedback route is mounted — no other endpoints needed.
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _make_app(user_id=None):
+    """
+    Build a fresh TestClient app.
+    Pass user_id=None to simulate a guest.
+    """
+    if user_id is not None:
+        chat_module.require_user = _make_auth(user_id)
+    else:
+        chat_module.require_user = _guest_auth
+
+    app = Starlette(routes=[
+        Route("/api/chat/feedback", submit_feedback, methods=["POST"]),
+    ])
+    return TestClient(app, raise_server_exceptions=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# FIXTURES
+# ═════════════════════════════════════════════════════════════════════════════
+
+USER_ID    = 1
+SESSION_ID = "test-session-uuid"
+
+@pytest.fixture(autouse=True)
+def fresh_db():
+    """Reset and seed the database before every test."""
+    _reset_db()
+    yield
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TESTS
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestFeedbackSuccess:
+    """Happy-path cases — valid votes from authenticated users."""
+
+    def test_like_returns_200(self):
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["data"]["feedback"] == "like"
+        assert data["data"]["message_id"] == message_id
+
+    def test_dislike_returns_200(self):
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "dislike"
+        })
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["feedback"] == "dislike"
+
+    def test_feedback_row_persisted_in_db(self):
+        """After a like, a real row must exist in message_feedback."""
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+
+        conn = _get_test_connection()
+        row = conn.execute(
+            "SELECT feedback FROM message_feedback WHERE message_id = ? AND user_id = ?",
+            (message_id, USER_ID)
+        ).fetchone()
+
+        assert row is not None, "No row found in message_feedback"
+        assert row["feedback"] == "like"
+
+
+class TestUpsertBehaviour:
+    """Re-voting must UPDATE the existing row, not INSERT a duplicate."""
+
+    def test_revote_changes_value(self):
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        # First vote: like
+        client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+
+        # Second vote: dislike (change of mind)
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "dislike"
+        })
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["feedback"] == "dislike"
+
+    def test_revote_does_not_duplicate_row(self):
+        """Only one row per (message_id, user_id) should ever exist."""
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        client.post("/api/chat/feedback", json={
+            "message_id": message_id, "session_id": SESSION_ID, "feedback": "like"
+        })
+        client.post("/api/chat/feedback", json={
+            "message_id": message_id, "session_id": SESSION_ID, "feedback": "dislike"
+        })
+
+        conn = _get_test_connection()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM message_feedback WHERE message_id = ? AND user_id = ?",
+            (message_id, USER_ID)
+        ).fetchone()[0]
+
+        assert count == 1, f"Expected 1 row, found {count} (upsert created duplicates)"
+
+
+class TestValidation:
+    """Bad input must be rejected with 400 before touching the DB."""
+
+    def test_missing_message_id(self):
+        _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+        assert resp.status_code == 400
+
+    def test_missing_session_id(self):
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "feedback":   "like"
+        })
+        assert resp.status_code == 400
+
+    def test_missing_feedback(self):
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+        })
+        assert resp.status_code == 400
+
+    def test_invalid_feedback_value(self):
+        """Only 'like' and 'dislike' are valid — anything else is 400."""
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "meh"
+        })
+        assert resp.status_code == 400
+        assert "like" in resp.json()["detail"] or "dislike" in resp.json()["detail"]
+
+    def test_non_integer_message_id(self):
+        _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": "abc",
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+        assert resp.status_code == 400
+
+    def test_empty_body(self):
+        _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={})
+        assert resp.status_code == 400
+
+
+class TestAuth:
+    """Unauthenticated (guest) requests must be rejected with 401."""
+
+    def test_guest_gets_401(self):
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=None)  # guest
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+        assert resp.status_code == 401
+
+    def test_guest_leaves_no_db_row(self):
+        """A rejected guest request must not write anything to the DB."""
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=None)
+
+        client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+
+        conn = _get_test_connection()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM message_feedback"
+        ).fetchone()[0]
+
+        assert count == 0, "Guest request wrote a row — auth guard failed"
+
+
+class TestOwnership:
+    """A user must not be able to vote on another user's messages."""
+
+    def test_wrong_user_gets_404(self):
+        """
+        Message belongs to USER_ID=1.
+        Request authenticated as USER_ID=2.
+        Should return 404 — message not found in their session.
+        """
+        message_id = _seed_db(user_id=1, session_id=SESSION_ID)
+
+        # Seed a second user so FK is valid
+        conn = _get_test_connection()
+        conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (2, 'otheruser')")
+        conn.commit()
+
+        client = _make_app(user_id=2)  # different user
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+        assert resp.status_code == 404
+
+    def test_wrong_session_gets_404(self):
+        """
+        Valid user, valid message_id, but wrong session_id in the body.
+        Should return 404.
+        """
+        message_id = _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": message_id,
+            "session_id": "completely-wrong-session-id",
+            "feedback":   "like"
+        })
+        assert resp.status_code == 404
+
+    def test_nonexistent_message_gets_404(self):
+        _seed_db(USER_ID, SESSION_ID)
+        client = _make_app(user_id=USER_ID)
+
+        resp = client.post("/api/chat/feedback", json={
+            "message_id": 99999,   # doesn't exist
+            "session_id": SESSION_ID,
+            "feedback":   "like"
+        })
+        assert resp.status_code == 404
+
+
+--------------------------------------------------------------------------------
+FILE: /aiService/tests/test_streaming_latency.py
+--------------------------------------------------------------------------------
+"""
+CB-10 Acceptance Test: Streaming First-Token Latency
+Tests that ask_openai_stream() / ask_llm_stream() delivers the first
+token within 2 seconds, per CB-10's acceptance criteria.
+
+Run with: python -m aiService.tests.test_streaming_latency
+"""
+
+import asyncio
+import time
+
+from aiService.services.llm_client import ask_llm_stream
+
+TARGET_FIRST_TOKEN_SECONDS = 2.0
+
+TEST_MESSAGES = [
+    {"message": "Explain what a partial derivative is.", "topic": ""},
+    {"message": "Find the gradient of f(x,y) = x^2y + 3y", "topic": "Gradients"},
+    {"message": "Walk me through Lagrange multipliers step by step.", "topic": ""},
+]
+
+
+async def measure_first_token(message: str, topic: str = "", history: list = None):
+    """
+    Streams a single response and measures:
+    - time to first token
+    - total time to completion
+    - total token/chunk count
+    """
+    start = time.perf_counter()
+    first_token_time = None
+    chunk_count = 0
+    full_text = ""
+
+    async for token in ask_llm_stream(message=message, topic=topic, history=history):
+        chunk_count += 1
+        if first_token_time is None:
+            first_token_time = time.perf_counter() - start
+        full_text += token
+
+    total_time = time.perf_counter() - start
+
+    return {
+        "message": message,
+        "first_token_seconds": round(first_token_time, 3) if first_token_time else None,
+        "total_seconds": round(total_time, 3),
+        "chunk_count": chunk_count,
+        "response_length_chars": len(full_text),
+        "passed": first_token_time is not None and first_token_time < TARGET_FIRST_TOKEN_SECONDS,
+    }
+
+
+async def run_latency_suite():
+    print(f"Running CB-10 streaming latency suite ({len(TEST_MESSAGES)} messages)")
+    print(f"Target: first token under {TARGET_FIRST_TOKEN_SECONDS}s\n")
+
+    results = []
+    for i, test_case in enumerate(TEST_MESSAGES, start=1):
+        result = await measure_first_token(**test_case)
+        results.append(result)
+
+        status = "PASS" if result["passed"] else "FAIL"
+        print(f"[{i}] {status} — first token: {result['first_token_seconds']}s "
+              f"| total: {result['total_seconds']}s "
+              f"| chunks: {result['chunk_count']} "
+              f"| \"{test_case['message'][:50]}\"")
+
+    passed = sum(1 for r in results if r["passed"])
+    print(f"\n{passed}/{len(results)} messages had first token under "
+          f"{TARGET_FIRST_TOKEN_SECONDS}s")
+
+    return results
+
+
+if __name__ == "__main__":
+    asyncio.run(run_latency_suite())
+
+--------------------------------------------------------------------------------
+FILE: /aiService/chatbot.py
+--------------------------------------------------------------------------------
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+import logging
+import re
+import json
+
+from aiService.services.llm_client import ask_llm, ask_llm_stream
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+app = FastAPI(
+    title="CalcVoyager Chat Service",
+    description="Backend API service for the CalcVoyager AI chatbot",
+    version="1.0.0"
+)
+
+
+class ChatRequest(BaseModel):
+    message: str
+    topic: str = ""
+    history: list = Field(default_factory=list)
+
+class ChatResponse(BaseModel):
+    answer: str
+    suggestions: list[str] = Field(default_factory=list)
+
+
+def parse_follow_ups(raw_response: str) -> tuple[str, list[str]]:
+    """
+    Extract [FOLLOW_UPS]...[/FOLLOW_UPS] block from LLM response.
+
+    Returns:
+        (clean_answer, suggestions_list)
+    """
+    pattern = r'\[FOLLOW_UPS\](.*?)\[/FOLLOW_UPS\]'
+    match = re.search(pattern, raw_response, re.DOTALL | re.IGNORECASE)
+
+    if not match:
+        return raw_response.strip(), []
+
+    follow_ups_text = match.group(1).strip()
+    clean_answer = re.sub(pattern, '', raw_response, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    suggestions = []
+    for line in follow_ups_text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        cleaned = re.sub(r'^\d+[\.\)]\s*', '', line)
+        cleaned = re.sub(r'^-\s*', '', cleaned)
+        if cleaned:
+            suggestions.append(cleaned)
+
+    return clean_answer, suggestions
+
+
+@app.get("/")
+async def home():
+    return {
+        "status": "running",
+        "service": "CalcVoyager Chat Service"
+    }
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy"
+    }
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+
+    try:
+        logging.info(
+            f"Received question: {request.message}"
+        )
+
+        raw_response = await ask_llm(
+            message=request.message,
+            topic=request.topic,
+            history=request.history
+        )
+
+        clean_answer, suggestions = parse_follow_ups(raw_response)
+
+        logging.info(
+            f"Parsed {len(suggestions)} follow-up suggestions"
+        )
+
+        return ChatResponse(
+            answer=clean_answer,
+            suggestions=suggestions
+        )
+
+    except Exception as e:
+        logging.error(
+            f"Chat error: {str(e)}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="AI service unavailable"
+        )
+
+
+class ChatStreamRequest(BaseModel):
+    message: str
+    topic: str = ""
+    history: list = Field(default_factory=list)
+
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatStreamRequest):
+    """
+    Streaming chat endpoint. Sends Server-Sent Events (SSE) as the
+    model generates tokens, instead of waiting for the full response.
+
+    Event format:
+        data: <json with a "token" field>\n\n
+    Final event:
+        data: [DONE]\n\n
+    On error:
+        data: <json with an "error" field>\n\n   followed by [DONE]
+    """
+
+    async def event_generator():
+        full_response = ""
+        try:
+            logging.info(
+                f"Received streaming question: {request.message}"
+            )
+
+            async for token in ask_llm_stream(
+                message=request.message,
+                topic=request.topic,
+                history=request.history
+            ):
+                full_response += token
+                payload = json.dumps({"token": token})
+                yield f"data: {payload}\n\n"
+
+            # Once streaming is done, parse follow-ups from the
+            # full concatenated text and send them as a final event
+            clean_answer, suggestions = parse_follow_ups(full_response)
+            final_payload = json.dumps({
+                "done": True,
+                "suggestions": suggestions
+            })
+            yield f"data: {final_payload}\n\n"
+
+        except Exception as e:
+            logging.error(
+                f"Streaming chat error: {str(e)}"
+            )
+            error_payload = json.dumps({"error": "AI service unavailable"})
+            yield f"data: {error_payload}\n\n"
+
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disables proxy buffering (e.g. nginx)
+        }
+    )
+
+--------------------------------------------------------------------------------
+FILE: /aiService/readme.md
+--------------------------------------------------------------------------------
+# CalcVoyager Chat Service
+
+## Run
+
+uvicorn aiService.chatbot:app --reload
+
+## Endpoints
+
+GET /
+
+GET /health
+
+POST /chat
+
+## Example Request
+
+{
+  "message": "Find derivative of x^2",
+  "topic": "derivatives",
+  "history": []
+}
+
+## Example Response
+
+{
+  "answer": "..."
+}
+
+--------------------------------------------------------------------------------
+FILE: /aiService/requirements.txt
+--------------------------------------------------------------------------------
+fastapi
+uvicorn
+pydantic
+python-dotenv
+openai
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/app/auth/__init__.py
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/app/auth/auth_utils.py
+--------------------------------------------------------------------------------
+from starlette.requests import Request
+
+def require_user(request: Request):
+    """
+    Extract user_id from request.
+    Checks Authorization header for Bearer token.
+    Returns user_id (int) if authenticated, None if guest.
+    
+    For now: returns a hardcoded user_id for testing.
+    Replace with real JWT decode when auth system is ready.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        if token:
+            # TODO: Replace with real JWT decode
+            # For testing, any Bearer token = user_id 1
+            return 1
+    
+    return None  # Guest user
+
+--------------------------------------------------------------------------------
+FILE: /backend/app/database/db.py
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/app/routes/__init__.py
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/app/routes/chat.py
+--------------------------------------------------------------------------------
+# routers/chat.py - Complete chat implementation for Starlette
+import json
+import uuid
+import httpx
+from typing import Optional, Dict, Any
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+
+# from auth_utils import require_user
+from backend.app.auth.auth_utils import require_user
+# from db import fetchone, fetchall, execute, scalar
+from backend.app.database.db import fetchone, fetchall, execute, scalar, upsert_feedback, get_feedback_for_message  # CB-12# Configuration for aiService
+AI_SERVICE_URL = "http://127.0.0.1:8001"  # aiService chatbot.py runs on port 8001
+
+# ── Helper Functions ──────────────────────────────────────────────────────────
+
+async def get_user_id(request: Request):
+    """Get user_id from request or return 401 response"""
+    user_id = require_user(request)
+    if user_id is None:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    return user_id
+
+async def validate_session(user_id: int, session_id: str) -> Optional[Dict[str, Any]]:
+    """Validate session exists and belongs to user"""
+    return await fetchone(
+        "SELECT id, user_id, session_id, title, is_active, created_at, updated_at "
+        "FROM chat_sessions WHERE user_id = ? AND session_id = ? AND is_active = 1",
+        (user_id, session_id)
+    )
+
+def json_response(data, status=200):
+    """Helper for consistent JSON responses"""
+    return JSONResponse(data, status_code=status)
+
+# ── Endpoint Handlers ─────────────────────────────────────────────────────────
+
+async def create_session(request: Request):
+    """POST /api/chat/sessions - Create a new chat session"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    # FIX: always attempt to parse JSON, regardless of content-type header
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    title = body.get('title', 'New Chat')
+
+    session_id = str(uuid.uuid4())
+
+    await execute(
+        "INSERT INTO chat_sessions (user_id, session_id, title, updated_at) "
+        "VALUES (?, ?, ?, strftime('%s','now'))",
+        (user_id, session_id, title)
+    )
+
+    session = await fetchone(
+        "SELECT id, user_id, session_id, title, is_active, created_at, updated_at "
+        "FROM chat_sessions WHERE session_id = ?",
+        (session_id,)
+    )
+
+    return json_response({"success": True, "data": session})
+
+
+async def get_sessions(request: Request):
+    """GET /api/chat/sessions - Get all chat sessions for the current user"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    limit = int(request.query_params.get('limit', 20))
+    limit = max(1, min(100, limit))
+
+    sessions = await fetchall(
+        """
+        SELECT
+            cs.id, cs.user_id, cs.session_id, cs.title, cs.is_active,
+            cs.created_at, cs.updated_at,
+            (SELECT COUNT(*) FROM chat_messages WHERE session_id = cs.session_id) as message_count,
+            (SELECT MAX(created_at) FROM chat_messages WHERE session_id = cs.session_id) as last_message_at
+        FROM chat_sessions cs
+        WHERE cs.user_id = ? AND cs.is_active = 1
+        ORDER BY cs.updated_at DESC
+        LIMIT ?
+        """,
+        (user_id, limit)
+    )
+
+    return json_response({"success": True, "data": sessions})
+
+
+async def get_conversation_history(request: Request):
+    """GET /api/chat/history/{session_id} - Get conversation history for a session"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    session_id = request.path_params.get('session_id')
+    if not session_id:
+        return json_response({"detail": "session_id required"}, 400)
+
+    limit = int(request.query_params.get('limit', 50))
+    limit = max(1, min(200, limit))
+    offset = int(request.query_params.get('offset', 0))
+    offset = max(0, offset)
+
+    # Validate session
+    session = await validate_session(user_id, session_id)
+    if not session:
+        return json_response({"detail": "Session not found"}, 404)
+
+    # Get messages (ordered by created_at DESC for latest first)
+    messages = await fetchall(
+        """
+        SELECT id, user_id, session_id, message_type, content, metadata, created_at
+        FROM chat_messages
+        WHERE user_id = ? AND session_id = ?
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (user_id, session_id, limit, offset)
+    )
+
+    # Get total count
+    total = await scalar(
+        "SELECT COUNT(*) FROM chat_messages WHERE user_id = ? AND session_id = ?",
+        (user_id, session_id)
+    )
+
+    # Parse metadata JSON for each message
+    for msg in messages:
+        if msg.get('metadata'):
+            try:
+                msg['metadata'] = json.loads(msg['metadata'])
+            except Exception:
+                msg['metadata'] = {}
+
+    return json_response({
+        "success": True,
+        "data": {
+            "session": session,
+            "messages": messages,
+            "total_count": total or 0,
+            "limit": limit,
+            "offset": offset
+        }
+    })
+
+
+async def save_message(request: Request):
+    """POST /api/chat/messages - Save a chat message"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    try:
+        body = await request.json()
+    except Exception:
+        return json_response({"detail": "Invalid JSON body"}, 400)
+
+    session_id   = body.get('session_id')
+    message_type = body.get('message_type')
+    content      = body.get('content')
+    metadata     = body.get('metadata', {})
+
+    # Validate required fields
+    if not all([session_id, message_type, content]):
+        return json_response(
+            {"detail": "session_id, message_type, and content are required"},
+            400
+        )
+
+    # Validate message_type
+    if message_type not in ['user', 'assistant', 'system']:
+        return json_response(
+            {"detail": "message_type must be 'user', 'assistant', or 'system'"},
+            400
+        )
+
+    # Validate session exists and belongs to user
+    session = await validate_session(user_id, session_id)
+    if not session:
+        return json_response({"detail": "Session not found"}, 404)
+
+    # Save message
+    metadata_json = json.dumps(metadata or {})
+
+    # FIX: use the returned rowid instead of last_insert_rowid() across connections
+    message_id = await execute(
+        "INSERT INTO chat_messages (user_id, session_id, message_type, content, metadata) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, session_id, message_type, content, metadata_json)
+    )
+
+    # Update session's updated_at timestamp
+    await execute(
+        "UPDATE chat_sessions SET updated_at = strftime('%s','now') WHERE session_id = ?",
+        (session_id,)
+    )
+
+    # FIX: fetch by the actual rowid, not last_insert_rowid() on a new connection
+    message = await fetchone(
+        "SELECT id, user_id, session_id, message_type, content, metadata, created_at "
+        "FROM chat_messages WHERE id = ?",
+        (message_id,)
+    )
+
+    if message and message.get('metadata'):
+        try:
+            message['metadata'] = json.loads(message['metadata'])
+        except Exception:
+            message['metadata'] = {}
+
+    return json_response({"success": True, "data": message})
+
+
+async def update_session_title(request: Request):
+    """PUT /api/chat/sessions/{session_id} - Update session title"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    session_id = request.path_params.get('session_id')
+    if not session_id:
+        return json_response({"detail": "session_id required"}, 400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return json_response({"detail": "Invalid JSON body"}, 400)
+
+    title = body.get('title')
+    if not title:
+        return json_response({"detail": "title is required"}, 400)
+
+    # Validate session exists and belongs to user
+    session = await validate_session(user_id, session_id)
+    if not session:
+        return json_response({"detail": "Session not found"}, 404)
+
+    await execute(
+        "UPDATE chat_sessions SET title = ?, updated_at = strftime('%s','now') "
+        "WHERE user_id = ? AND session_id = ? AND is_active = 1",
+        (title, user_id, session_id)
+    )
+
+    updated_session = await fetchone(
+        "SELECT id, user_id, session_id, title, is_active, created_at, updated_at "
+        "FROM chat_sessions WHERE user_id = ? AND session_id = ?",
+        (user_id, session_id)
+    )
+
+    return json_response({"success": True, "data": updated_session})
+
+
+async def delete_session(request: Request):
+    """DELETE /api/chat/sessions/{session_id} - Delete a chat session (soft delete)"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    session_id = request.path_params.get('session_id')
+    if not session_id:
+        return json_response({"detail": "session_id required"}, 400)
+
+    # Validate session exists and belongs to user
+    session = await validate_session(user_id, session_id)
+    if not session:
+        return json_response({"detail": "Session not found"}, 404)
+
+    # Soft delete
+    await execute(
+        "UPDATE chat_sessions SET is_active = 0, updated_at = strftime('%s','now') "
+        "WHERE user_id = ? AND session_id = ? AND is_active = 1",
+        (user_id, session_id)
+    )
+
+    return json_response({"success": True, "message": "Session deleted successfully"})
+
+
+async def get_session_messages(request: Request):
+    """GET /api/chat/sessions/{session_id}/messages - Alias for history"""
+    return await get_conversation_history(request)
+
+
+async def chat_endpoint(request: Request):
+    """
+    POST /api/chat - Main chat endpoint that combines LLM calls with DB storage
+
+    Accepts: { messages, context, page_url }
+    Returns: { reply, suggestions, message_id }
+
+    If authenticated: saves user message and assistant reply to DB
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return json_response({"detail": "Invalid JSON body"}, 400)
+
+    messages = body.get('messages', [])
+    context  = body.get('context', '')
+    page_url = body.get('page_url', '/')
+
+    if not messages:
+        return json_response({"detail": "messages array is required"}, 400)
+
+    # Extract the latest user message
+    user_message = None
+    if messages and isinstance(messages, list):
+        for msg in reversed(messages):
+            if msg.get('role') == 'user':
+                user_message = msg.get('content', '')
+                break
+
+    if not user_message:
+        return json_response({"detail": "No user message found"}, 400)
+
+    # Get user_id if authenticated (optional - guests can chat too)
+    user_id = None
+    try:
+        user_id = require_user(request)
+    except Exception:
+        pass  # Guest user
+
+    # Call the aiService chatbot
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            ai_response = await client.post(
+                f"{AI_SERVICE_URL}/chat",
+                json={
+                    "message": user_message,
+                    "topic": context or "",
+                    "history": messages[:-1] if len(messages) > 1 else []
+                }
+            )
+            ai_response.raise_for_status()
+            ai_data = ai_response.json()
+    except httpx.TimeoutException:
+        return json_response(
+            {"detail": "AI service timeout - please try again"},
+            504
+        )
+    except httpx.HTTPError as e:
+        return json_response(
+            {"detail": f"AI service error: {str(e)}"},
+            502
+        )
+    except Exception as e:
+        return json_response(
+            {"detail": f"Failed to reach AI service: {str(e)}"},
+            500
+        )
+
+    reply       = ai_data.get('answer', '')
+    suggestions = ai_data.get('suggestions', [])
+    # FIX: track the assistant message_id so CB-12 feedback can reference it
+    assistant_message_id = None
+
+    # If user is authenticated, save to database
+    if user_id:
+        try:
+            # Get or create active session
+            active_session = await fetchone(
+                "SELECT session_id FROM chat_sessions "
+                "WHERE user_id = ? AND is_active = 1 "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (user_id,)
+            )
+
+            if not active_session:
+                # Create new session
+                session_id = str(uuid.uuid4())
+                title = user_message[:50] + ('...' if len(user_message) > 50 else '')
+                await execute(
+                    "INSERT INTO chat_sessions (user_id, session_id, title, updated_at) "
+                    "VALUES (?, ?, ?, strftime('%s','now'))",
+                    (user_id, session_id, title)
+                )
+            else:
+                session_id = active_session['session_id']
+
+            # Save user message
+            await execute(
+                "INSERT INTO chat_messages (user_id, session_id, message_type, content, metadata) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, session_id, 'user', user_message, json.dumps({"page_url": page_url}))
+            )
+
+            # Save assistant reply
+            # FIX: capture the rowid directly so we can return message_id to the frontend
+            metadata = {"page_url": page_url}
+            if suggestions:
+                metadata["suggestions"] = suggestions
+
+            assistant_message_id = await execute(
+                "INSERT INTO chat_messages (user_id, session_id, message_type, content, metadata) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, session_id, 'assistant', reply, json.dumps(metadata))
+            )
+
+            # Update session timestamp
+            await execute(
+                "UPDATE chat_sessions SET updated_at = strftime('%s','now') WHERE session_id = ?",
+                (session_id,)
+            )
+        except Exception as e:
+            # Log error but don't fail the request - user still gets their answer
+            import logging
+            logging.error(f"Failed to save chat to DB: {str(e)}")
+
+    # FIX: include message_id in response so frontend can submit CB-12 feedback
+    return json_response({
+        "reply":      reply,
+        "suggestions": suggestions,
+        "message_id": assistant_message_id  # None for guests; frontend should handle both
+    })
+
+
+# ── CB-12: Feedback Endpoint ──────────────────────────────────────────────────
+
+async def submit_feedback(request: Request):
+    """
+    POST /api/chat/feedback
+    CB-12 — Persist thumbs-up / thumbs-down votes from authenticated users.
+
+    Request body (JSON):
+        {
+            "message_id":  <int>,
+            "session_id":  "<uuid>",
+            "feedback":    "like" | "dislike"
+        }
+
+    Returns 200 on success, 400 on bad input, 401 if unauthenticated,
+    404 if the message doesn't belong to the user's session.
+    """
+    # Auth guard
+    user_id = require_user(request)
+    if user_id is None:
+        return json_response({"detail": "Not authenticated"}, 401)
+
+    # Parse body
+    try:
+        body = await request.json()
+    except Exception:
+        return json_response({"detail": "Invalid JSON body"}, 400)
+
+    message_id = body.get("message_id")
+    session_id = body.get("session_id")
+    feedback   = body.get("feedback")
+
+    # Validate required fields
+    if not all([message_id, session_id, feedback]):
+        return json_response(
+            {"detail": "message_id, session_id, and feedback are required"},
+            400
+        )
+
+    if feedback not in ("like", "dislike"):
+        return json_response(
+            {"detail": "feedback must be 'like' or 'dislike'"},
+            400
+        )
+
+    if not isinstance(message_id, int):
+        return json_response(
+            {"detail": "message_id must be an integer"},
+            400
+        )
+
+    # Verify the message exists and belongs to this user's session
+    message = await fetchone(
+        """
+        SELECT cm.id, cm.user_id, cm.session_id
+        FROM   chat_messages cm
+        JOIN   chat_sessions  cs ON cs.session_id = cm.session_id
+        WHERE  cm.id         = ?
+          AND  cm.session_id = ?
+          AND  cs.user_id    = ?
+          AND  cs.is_active  = 1
+        """,
+        (message_id, session_id, user_id)
+    )
+
+    if not message:
+        return json_response(
+            {"detail": "Message not found or does not belong to your session"},
+            404
+        )
+
+    # Upsert feedback
+    await upsert_feedback(
+        message_id=message_id,
+        user_id=user_id,
+        session_id=session_id,
+        feedback=feedback
+    )
+
+    saved = await get_feedback_for_message(message_id, user_id)
+
+    return json_response({
+        "success": True,
+        "data": {
+            "message_id": message_id,
+            "feedback":   saved["feedback"],
+            "created_at": saved["created_at"]
+        }
+    })
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+routes = [
+    Route("/chat",                           chat_endpoint,            methods=["POST"]),
+    Route("/sessions",                       create_session,           methods=["POST"]),
+    Route("/sessions",                       get_sessions,             methods=["GET"]),
+    Route("/sessions/{session_id}",          update_session_title,     methods=["PUT"]),
+    Route("/sessions/{session_id}",          delete_session,           methods=["DELETE"]),
+    Route("/messages",                       save_message,             methods=["POST"]),
+    Route("/history/{session_id}",           get_conversation_history, methods=["GET"]),
+    Route("/sessions/{session_id}/messages", get_session_messages,     methods=["GET"]),
+    Route("/feedback",                       submit_feedback,          methods=["POST"]),  # CB-12
+]
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/app/__init__.py
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/app/main.py
+--------------------------------------------------------------------------------
+"""
+CalcVoyager Backend - Main Application
+Starlette-based backend with chat integration
+"""
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.routing import Mount
+from starlette.responses import JSONResponse
+
+from backend.app.routes import chat
+
+# CORS middleware configuration
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+]
+
+# Application
+app = Starlette(
+    debug=True,
+    middleware=middleware,
+    routes=[
+        Mount("/api/chat", routes=chat.routes),
+    ]
+)
+
+@app.route("/")
+async def homepage(request):
+    """Health check endpoint"""
+    return JSONResponse({
+        "service": "CalcVoyager Backend",
+        "status": "running",
+        "endpoints": {
+            "chat": "/api/chat",
+            "sessions": "/api/chat/sessions",
+            "history": "/api/chat/history/{session_id}"
+        }
+    })
+
+@app.route("/health")
+async def health(request):
+    """Health check"""
+    return JSONResponse({"status": "healthy"})
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/__init__.py
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+FILE: /backend/requirements.txt
+--------------------------------------------------------------------------------
+starlette
+uvicorn
+httpx
+python-multipart
+
+
+--------------------------------------------------------------------------------
+FILE: /frontend/public/index.html
+--------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CalcVoyager Chatbot — Hassan Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <noscript>You need JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/Chatbot.css
+--------------------------------------------------------------------------------
+/* ═══════════════════════════════════════════════════════════════════════════
+   Chatbot.css — CalcVoyager AI Tutor Widget
+   Uses the same CSS variables as index.css (--ink, --paper, --gold, etc.)
+   Supports both light and dark themes automatically via [data-theme="dark"].
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Fixed anchor — bubble + panel aligned bottom-right */
+.cb-root {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column-reverse; /* button stays at bottom anchor */
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.cb-bubble {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0 1.1rem 0 0.85rem;
+  height: 52px;
+  min-width: 52px;
+  box-sizing: border-box;
+  background: var(--gold);
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  box-shadow: 0 8px 28px rgba(194, 138, 46, 0.45), 0 2px 8px rgba(0, 0, 0, 0.18);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.cb-bubble:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 36px rgba(194, 138, 46, 0.55), 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+
+.cb-bubble:active {
+  transform: translateY(0);
+}
+
+.cb-bubble--open {
+  background: var(--ink-2);
+  padding: 0;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 50%;
+}
+
+.cb-bubble-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cb-bubble-label {
+  font-size: 0.83rem;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.cb-bubble-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+  background: #e84040;
+  border: 2px solid #fff;
+  border-radius: 50%;
+}
+
+.cb-panel-wrapper {
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  animation: cb-slide-up 0.22s ease;
+}
+
+
+  @keyframes cb-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  .cb-window button:focus-visible,
+  .cb-window textarea:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+  
+
+  
+  /* ── Backdrop (mobile only) ───────────────────────────────────────────────── */
+  .cb-backdrop {
+    display: none;
+  }
+  
+  /* ── Chat Window ──────────────────────────────────────────────────────────── */
+  .cb-window {
+    display: flex;
+    flex-direction: column;
+    height: 560px;
+    max-height: 80vh;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: var(--shadow-hard);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  
+  .cb-new-chat-btn {
+    width: auto;
+    height: 30px;
+    padding: 0 0.65rem 0 0.5rem;
+    gap: 0.35rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+    background: linear-gradient(135deg, rgba(240, 198, 111, 0.18), rgba(47, 116, 107, 0.18));
+    border: 1px solid rgba(240, 198, 111, 0.35);
+    color: var(--gold-2);
+    transition: background 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  }
+
+  .cb-new-chat-btn:hover {
+    background: linear-gradient(135deg, rgba(240, 198, 111, 0.28), rgba(47, 116, 107, 0.28));
+    border-color: rgba(240, 198, 111, 0.55);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(194, 138, 46, 0.25);
+  }
+
+  .cb-new-chat-btn:active {
+    transform: translateY(0);
+  }
+
+  .cb-new-chat-icon {
+    font-size: 0.95rem;
+    line-height: 1;
+    font-weight: 800;
+  }
+  /* ── Window Header ────────────────────────────────────────────────────────── */
+  .cb-window-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    background: linear-gradient(90deg, rgba(49, 78, 115, 0.22), transparent 34%), #111317;
+    border-bottom: 1px solid rgba(240, 198, 111, 0.28);
+    flex-shrink: 0;
+    overflow:hidden;
+  }
+  
+  /* Shimmer line — matches site header */
+  .cb-window-header::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(240, 198, 111, 0.8),
+      rgba(47, 116, 107, 0.8),
+      transparent
+    );
+    opacity: 0.6;
+  }
+  
+  .cb-header-brand {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 0.65rem;
+  }
+  
+  .cb-header-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--gold-2), var(--teal));
+    color: #111317;
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-family: Georgia, serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  
+  .cb-header-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+  }
+  
+  .cb-header-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #fff7dc;
+    line-height: 1.2;
+  }
+  .cb-icon-btn:active,
+.cb-tab-btn:active,
+.cb-new-chat-btn:active,
+.cb-sym-toggle:active {
+  transform: scale(0.92);
+}
+
+.cb-symbols-palette {
+  animation: cb-panel-slide 0.18s ease both;
+}
+
+@keyframes cb-panel-slide {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cb-symbols-palette { animation: none; }
+}
+.cb-backdrop {
+  backdrop-filter: blur(2px);
+}
+  .cb-header-topic {
+    font-size: 0.72rem;
+    color: rgba(240, 198, 111, 0.7);
+    line-height: 1.2;
+    max-width: 180px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .cb-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+  }
+  
+  .cb-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: rgba(255, 250, 241, 0.08);
+    border: 1px solid rgba(255, 250, 241, 0.15);
+    border-radius: 6px;
+    color: rgba(255, 250, 241, 0.7);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: background 0.15s, color 0.15s;
+  }
+  
+  .cb-icon-btn:hover {
+    background: rgba(240, 198, 111, 0.15);
+    color: var(--gold-2);
+  }
+  
+  .cb-icon-btn--close:hover {
+    background: rgba(220, 60, 60, 0.2);
+    color: #ff8080;
+  }
+  
+  .cb-tab-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: rgba(255, 250, 241, 0.08);
+    border: 1px solid rgba(255, 250, 241, 0.15);
+    border-radius: 6px;
+    color: rgba(255, 250, 241, 0.7);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: background 0.15s, color 0.15s;
+  }
+  
+  .cb-tab-btn:hover,
+  .cb-tab-btn--active {
+    background: rgba(240, 198, 111, 0.2);
+    border-color: rgba(240, 198, 111, 0.35);
+    color: var(--gold-2);
+  }
+  
+  /* ── Topic Bar ────────────────────────────────────────────────────────────── */
+  .cb-topic-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 1rem;
+    background: rgba(194, 138, 46, 0.07);
+    border-bottom: 1px solid rgba(194, 138, 46, 0.15);
+    font-size: 0.72rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  
+  .cb-topic-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+    flex-shrink: 0;
+    animation: cb-pulse 2.5s ease infinite;
+  }
+  
+  @keyframes cb-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  
+  .cb-topic-text {
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+  
+  .cb-topic-text strong {
+    color: var(--gold);
+    font-weight: 700;
+  }
+  
+  .cb-guest-note {
+    margin-left: auto;
+    font-size: 0.68rem;
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  
+  /* ── Scrollable Body ──────────────────────────────────────────────────────── */
+  .cb-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    scroll-behavior: smooth;
+  }
+  
+  .cb-body::-webkit-scrollbar {
+    width: 4px;
+  }
+  .cb-body::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .cb-body::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 99px;
+  }
+  .cb-body::-webkit-scrollbar-thumb:hover {
+    background: var(--gold);
+  }
+  
+  /* ── Welcome Screen ───────────────────────────────────────────────────────── */
+  .cb-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    flex: 1;
+    padding: 1.5rem 1rem;
+    gap: 0.65rem;
+  }
+  
+  .cb-welcome-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--gold-2), var(--teal));
+    color: #111317;
+    font-size: 1.8rem;
+    font-weight: 700;
+    font-family: Georgia, serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 24px rgba(194, 138, 46, 0.25);
+  }
+  
+  .cb-welcome-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0;
+  }
+  
+  .cb-welcome-sub {
+    font-size: 0.82rem;
+    color: var(--muted);
+    line-height: 1.55;
+    margin: 0;
+    max-width: 280px;
+  }
+  
+  .cb-welcome-sub strong {
+    color: var(--gold);
+  }
+  
+  .cb-welcome-hints {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+    max-width: 300px;
+    margin-top: 0.5rem;
+  }
+  
+    .cb-hint-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--ink);
+    font-size: 0.78rem;
+    padding: 0.55rem 0.8rem;
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+  }
+
+  .cb-hint-chip::before {
+    content: "∫";
+    flex-shrink: 0;
+    font-family: Georgia, serif;
+    font-size: 0.9rem;
+    color: var(--gold);
+    opacity: 0.75;
+  }
+
+  .cb-hint-chip:hover {
+    border-color: var(--gold);
+    background: rgba(194, 138, 46, 0.07);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(194, 138, 46, 0.15);
+  }
+  
+  /* ── Message Rows ─────────────────────────────────────────────────────────── */
+  .cb-msg-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    width: 100%;
+  }
+  
+  .cb-msg-row--user {
+    flex-direction: row-reverse;
+  }
+  
+  .cb-msg-row--bot {
+    flex-direction: row;
+  }
+  
+  .cb-msg-row .cb-msg-bubble {
+    max-width: calc(100% - 36px);
+  }
+  
+  /* ── Avatars ──────────────────────────────────────────────────────────────── */
+  .cb-msg-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-size: 0.78rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-family: Georgia, serif;
+  }
+  
+  .cb-msg-avatar--bot {
+    background: linear-gradient(135deg, var(--gold-2), var(--teal));
+    color: #111317;
+    box-shadow: 0 2px 6px rgba(194, 138, 46, 0.25);
+    font-size: 0.85rem;
+  }
+  
+  .cb-msg-avatar--user {
+    background: var(--gold);
+    color: #fff;
+    font-size: 0.75rem;
+    font-family: Inter, sans-serif;
+  }
+  
+  /* ── Bubbles ──────────────────────────────────────────────────────────────── */
+  /* ── Message blocks (separate from floating .cb-bubble button) ── */
+.cb-msg-block {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  animation: cb-msg-enter 0.28s ease both;
+}
+@keyframes cb-msg-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cb-msg-block { animation: none; }
+}
+.cb-msg-block--bot .cb-msg-feedback {
+  margin-left: 36px;
+  margin-top: 0.3rem;
+}
+
+.cb-msg-feedback--after-suggestions {
+  margin-left: 36px;
+  margin-top: 0.45rem;
+  opacity: 0.85;
+}
+
+.cb-msg-bubble {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  height: auto;
+  min-height: unset;
+  padding: 0.75rem 1rem;
+  border-radius: 16px;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  box-sizing: border-box;
+}
+
+.cb-msg-bubble--user {
+  background: var(--gold);
+  color: #fff;
+  border-bottom-right-radius: 6px;
+}
+
+.cb-msg-bubble--bot {
+  background: var(--paper-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+
+.cb-msg-bubble--error {
+  background: rgba(220, 60, 60, 0.08);
+  border: 1px solid rgba(220, 60, 60, 0.25);
+  color: var(--ink);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.cb-msg-bubble--typing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0.75rem 1rem;
+  min-width: 52px;
+  width: fit-content;
+}
+
+.cb-msg-bubble--bot .cb-msg-text {
+  display: block;
+  text-align: left;
+}
+
+.cb-msg-bubble--user .cb-msg-text {
+  text-align: left;
+}
+
+.cb-msg-bubble .cb-msg-time {
+  display: block;
+  font-size: 0.65rem;
+  opacity: 0.55;
+  margin-top: 0.35rem;
+  text-align: right;
+}
+
+[data-theme="dark"] .cb-msg-bubble--bot .katex {
+  color: var(--ink);
+}
+  
+  .cb-bubble--error {
+    background: rgba(220, 60, 60, 0.08);
+    border: 1px solid rgba(220, 60, 60, 0.25);
+    color: var(--ink);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+  
+  .cb-error-icon {
+    color: #c94040;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  
+  .cb-msg-text {
+    display: block;
+  }
+  
+  .cb-msg-time {
+    display: block;
+    font-size: 0.65rem;
+    opacity: 0.55;
+    margin-top: 0.25rem;
+    text-align: right;
+  }
+  
+  /* ── KaTeX Math rendering ─────────────────────────────────────────────────── */
+  .cb-math-inline {
+    display: inline;
+    margin: 0 1px;
+  }
+  
+  .cb-math-block {
+    display: block;
+    overflow-x: auto;
+    margin: 0.5rem 0;
+    padding: 0.5rem 0;
+    text-align: center;
+  }
+  
+  /* KaTeX color fix for dark mode */
+  [data-theme="dark"] .cb-bubble--bot .katex {
+    color: var(--ink);
+  }
+  
+  /* ── Typing Indicator ─────────────────────────────────────────────────────── */
+  .cb-bubble--typing {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0.75rem 1rem;
+    min-width: 52px;
+  }
+  
+  .cb-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    animation: cb-bounce 1.4s ease infinite;
+  }
+  
+  .cb-dot:nth-child(2) { animation-delay: 0.18s; }
+  .cb-dot:nth-child(3) { animation-delay: 0.36s; }
+  
+  @keyframes cb-bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+    40% { transform: translateY(-6px); opacity: 1; }
+  }
+  
+  /* ── Conversation turn (message + follow-ups) ─────────────────────────────── */
+  .cb-turn {
+    margin-bottom: 0.75rem;
+  }
+
+  .cb-turn--with-suggestions {
+    margin-bottom: 1.25rem;
+  }
+
+  /* ── Structured bot message text ────────────────────────────────────────── */
+  .cb-msg-text--structured {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .cb-msg-paragraph {
+    margin: 0;
+    line-height: 1.65;
+  }
+
+  .cb-msg-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .cb-msg-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.5rem 0.65rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 0.86rem;
+    line-height: 1.55;
+    counter-increment: step-counter;
+    position: relative;
+    padding-left: 2.1rem;
+  }
+
+  .cb-msg-steps {
+    counter-reset: step-counter;
+  }
+
+  .cb-msg-step::before {
+    content: counter(step-counter);
+    position: absolute;
+    left: 0.55rem;
+    top: 0.48rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--gold-2), var(--teal));
+    color: #111317;
+    font-size: 0.65rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* ── Suggested Questions ──────────────────────────────────────────────────── */
+  .cb-suggestions {
+    margin: 0.85rem 0 0 36px;
+    padding: 0.85rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    background: linear-gradient(135deg, rgba(194, 138, 46, 0.06) 0%, rgba(47, 116, 107, 0.05) 100%);
+    border: 1px solid rgba(194, 138, 46, 0.22);
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(194, 138, 46, 0.08);
+    animation: cb-suggestions-enter 0.45s ease both;
+  }
+
+  [data-theme="dark"] .cb-suggestions {
+    background: linear-gradient(135deg, rgba(194, 138, 46, 0.1) 0%, rgba(47, 116, 107, 0.08) 100%);
+    border-color: rgba(194, 138, 46, 0.28);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  }
+
+  .cb-suggestions-divider {
+    display: none;
+  }
+
+  .cb-suggestions-header {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .cb-suggestions-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: rgba(194, 138, 46, 0.15);
+    color: var(--gold);
+    flex-shrink: 0;
+  }
+
+  .cb-suggestions-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0;
+  }
+
+  .cb-suggestions-chips {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .cb-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--ink);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.55rem 0.85rem;
+    text-align: left;
+    transition: border-color 0.2s, background 0.2s, color 0.2s, transform 0.2s, box-shadow 0.2s;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    animation: cb-chip-enter 0.4s ease both;
+  }
+
+  .cb-chip--action {
+    border-color: rgba(194, 138, 46, 0.25);
+  }
+
+  .cb-chip--action:hover:not(:disabled) {
+    border-color: var(--gold);
+    background: rgba(194, 138, 46, 0.1);
+    color: var(--gold);
+    transform: translateX(4px);
+    box-shadow: 0 3px 12px rgba(194, 138, 46, 0.18);
+  }
+
+  .cb-chip--action:active:not(:disabled) {
+    transform: translateX(2px) scale(0.99);
+  }
+
+  .cb-chip:hover:not(:disabled) {
+    border-color: var(--gold);
+    background: rgba(194, 138, 46, 0.07);
+    color: var(--gold);
+  }
+
+  .cb-chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .cb-chip-icon {
+    font-size: 0.75rem;
+    color: var(--gold);
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+  }
+
+  .cb-chip--action:hover:not(:disabled) .cb-chip-icon {
+    transform: translate(2px, -2px);
+  }
+
+  .cb-chip-text {
+    flex: 1;
+    line-height: 1.45;
+  }
+
+  @keyframes cb-suggestions-enter {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes cb-chip-enter {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  /* ── Math Symbol Palette ──────────────────────────────────────────────────── */
+  .cb-symbols-palette {
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    flex-shrink: 0;
+    padding: 0.5rem 0.75rem;
+  }
+  
+  .cb-sym-groups {
+    display: flex;
+    gap: 0.3rem;
+    margin-bottom: 0.4rem;
+    flex-wrap: wrap;
+  }
+  
+  .cb-sym-group-btn {
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.2rem 0.55rem;
+    transition: all 0.15s;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  .cb-sym-group-btn:hover,
+  .cb-sym-group-btn.active {
+    background: var(--gold);
+    border-color: var(--gold);
+    color: #fff;
+  }
+  
+  .cb-sym-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: 0.3rem;
+  }
+  
+  .cb-sym-btn {
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--ink);
+    cursor: pointer;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 0.92rem;
+    padding: 0.35rem 0.25rem;
+    text-align: center;
+    transition: border-color 0.12s, background 0.12s, color 0.12s;
+    line-height: 1.2;
+  }
+  
+  .cb-sym-btn:hover {
+    border-color: var(--gold);
+    background: rgba(194, 138, 46, 0.1);
+    color: var(--gold);
+  }
+  
+  /* ── Input Area ───────────────────────────────────────────────────────────── */
+  .cb-input-area {
+    border-top: 1px solid var(--line);
+    background: var(--card);
+    padding: 0.65rem 0.75rem 0.5rem;
+    flex-shrink: 0;
+  }
+  .cb-input-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  margin-bottom: 0.5rem;
+  background: var(--paper-2);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.cb-input-preview-label {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding-top: 2px;
+}
+
+.cb-input-preview-content {
+  color: var(--ink);
+  word-break: break-word;
+}
+  .cb-input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+  
+  .cb-sym-toggle {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: Georgia, serif;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    align-self: flex-end;
+    margin-bottom: 1px;
+  }
+  
+  .cb-sym-toggle:hover,
+  .cb-sym-toggle.active {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: rgba(194, 138, 46, 0.08);
+  }
+  
+  .cb-textarea {
+    flex: 1;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    min-height: 36px;
+    max-height: 120px;
+    padding: 0.5rem 0.75rem;
+    resize: none;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  
+  .cb-textarea:focus {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(194, 138, 46, 0.12);
+  }
+  
+  .cb-textarea::placeholder {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  
+  .cb-textarea:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  .cb-send-btn {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    background: var(--gold);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 1.1rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s, transform 0.12s;
+    align-self: flex-end;
+    margin-bottom: 1px;
+  }
+    .cb-send-btn:not(:disabled) {
+    box-shadow: 0 0 0 3px rgba(194, 138, 46, 0.15);
+  }
+  .cb-send-btn:hover:not(:disabled) {
+    opacity: 0.85;
+    transform: translateY(-1px);
+  }
+  
+  .cb-send-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  
+  .cb-send-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  
+  .cb-input-hint {
+    font-size: 0.65rem;
+    color: var(--muted);
+    opacity: 0.65;
+    margin-top: 0.35rem;
+    padding-left: 42px;
+  }
+  
+  .cb-input-hint kbd {
+    background: var(--paper-2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.62rem;
+    padding: 0 3px;
+  }
+  
+  /* ── History Panel ────────────────────────────────────────────────────────── */
+  .cb-history-panel {
+    padding: 0.75rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  
+  .cb-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+  
+  .cb-history-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+  
+  .cb-history-empty {
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+  
+  .cb-history-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  
+  .cb-history-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    background: var(--paper);
+    transition: border-color 0.15s, background 0.15s;
+  }
+  
+  .cb-history-item:hover {
+    border-color: var(--gold);
+    background: var(--paper-2);
+  }
+  
+  .cb-history-preview {
+    font-size: 0.82rem;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 230px;
+  }
+  
+  .cb-history-time {
+    font-size: 0.7rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  
+  .cb-loading-history {
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-align: center;
+    padding: 2rem;
+  }
+  
+  /* ── Mobile Responsive ────────────────────────────────────────────────────── */
+  @media (max-width: 640px) {
+    .cb-bubble {
+      bottom: 16px;
+      right: 16px;
+      height: 48px;
+      padding: 0 0.9rem 0 0.75rem;
+    }
+  
+    .cb-panel-wrapper {
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      left: 0;
+      width: 100%;
+      max-width: 100%;
+      border-radius: 0;
+      /* Full-screen bottom sheet on mobile */
+      top: auto;
+    }
+  
+    .cb-window {
+      height: 100svh;
+      height: 100vh;
+      max-height: calc(100vh - 72px);
+      border-radius: 16px 16px 0 0;
+    }
+  
+    .cb-backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 898;
+    }
+  
+    .cb-bubble-label {
+      display: none;
+    }
+  
+    .cb-bubble {
+      padding: 0;
+      width: 52px;
+      justify-content: center;
+      border-radius: 50%;
+    }
+  
+    .cb-sym-grid {
+      grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    }
+
+    .cb-suggestions {
+      margin-left: 0;
+    }
+
+    .cb-msg-feedback--after-suggestions {
+      margin-left: 0;
+    }
+    .cb-root {
+      bottom: 16px;
+      right: 16px;
+      left: 16px;
+      align-items: flex-end;
+    }
+    
+    .cb-panel-wrapper {
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      left: 0;
+      width: 100%;
+      max-width: 100%;
+    }
+    
+  }
+  
+  /* ── Print: hide chatbot ──────────────────────────────────────────────────── */
+  @media print {
+    .cb-bubble,
+    .cb-panel-wrapper,
+    .cb-backdrop {
+      display: none !important;
+    }
+  }
+  .cb-msg-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: calc(100% - 40px);
+    min-width: 0;
+  }
+  
+  .cb-msg-row--user .cb-msg-col {
+    align-items: flex-end;
+  }
+  
+  .cb-msg-col .cb-bubble {
+    max-width: 100%;   /* bubble fills column, not double 82% */
+  }
+  
+
+
+  
+  .cb-msg-feedback {
+    display: flex;
+    gap: 0.35rem;
+    margin-top: 0.3rem;
+    padding-left: 0.15rem;
+  }
+  
+  .cb-feedback-btn {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+
+  .cb-feedback-btn svg {
+    width: 12px;
+    height: 12px;
+  }
+  
+  .cb-feedback-btn:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+  }
+  
+  .cb-feedback-btn--active-like {
+    border-color: var(--teal);
+    color: var(--teal);
+    background: rgba(47, 116, 107, 0.1);
+  }
+  
+  .cb-feedback-btn--active-dislike {
+    border-color: #c94040;
+    color: #c94040;
+    background: rgba(201, 64, 64, 0.08);
+  }
+
+  .cb-msg-col .cb-msg-feedback {
+    display: flex;
+    justify-content: center;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+    width: 100%;
+  }
+
+.cb-progress-container {
+  margin-bottom: 10px;
+}
+
+.cb-progress-label {
+  font-size: 0.8rem;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.cb-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e5e5e5;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.cb-progress-fill {
+  height: 100%;
+  background: #d4af37; /* gold */
+  transition: width 0.6s ease;
+}
+
+.cb-complete-badge {
+  margin-top: 12px;
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: #fff4cc;
+  color: #8a6d00;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+  
+
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/Chatbot.jsx
+--------------------------------------------------------------------------------
+import { useState, useEffect } from "react";
+import ChatWindow from "./ChatWindow";
+import { IconClose } from "./Icons";
+import "./Chatbot.css";
+
+function Chatbot() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "Escape" && isOpen) setIsOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (window.innerWidth <= 640) {
+      document.body.style.overflow = isOpen ? "hidden" : "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [isOpen]);
+
+  return (
+    <>
+      {isOpen && <div className="cb-backdrop" onClick={() => setIsOpen(false)} aria-hidden="true" />}
+  
+      <div className="cb-root">
+        {isOpen && (
+          <div className="cb-panel-wrapper">
+            <ChatWindow
+              onClose={() => setIsOpen(false)}
+              onActivity={() => !isOpen && setHasUnread(true)}
+            />
+          </div>
+        )}
+  
+        <button
+          type="button"
+          className={`cb-bubble${isOpen ? " cb-bubble--open" : ""}`}
+          onClick={() => {
+            if (isOpen) setIsOpen(false);
+            else { setIsOpen(true); setHasUnread(false); }
+          }}
+          aria-label={isOpen ? "Close calculus tutor" : "Open calculus tutor"}
+          aria-expanded={isOpen}
+          aria-haspopup="dialog"
+        >
+          <span className="cb-bubble-icon" aria-hidden="true">{
+            isOpen ? <IconClose /> : <span className="cb-bubble-icon">∂</span>}
+          </span>
+          {!isOpen && hasUnread && <span className="cb-bubble-badge" aria-label="New message" />}
+          {!isOpen && <span className="cb-bubble-label">Ask tutor</span>}
+        </button>
+      </div>
+    </>
+  );
+}
+
+export default Chatbot;
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/ChatWindow.jsx
+--------------------------------------------------------------------------------
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
+import { sendMessage, sendMessageStream, createChatSession, fetchChatHistory } from "../../services/chatApi";
+import { getContextString, getTopicContext, getPageUrl } from "../../utils/routeContext";
+import Message, { MessageFeedback, renderLatexSegments } from "./Message";
+import SuggestedQuestions from "./SuggestedQuestions";
+import MathSymbolPicker from "./MathSymbolPicker";
+import { IconClose, IconHistory, IconSigma, IconPlus, IconSend } from "./Icons";
+
+const WELCOME_PROMPTS = [
+  "How do I find ∂f/∂x?",
+  "Explain the gradient geometrically",
+  "What is the chain rule here?",
+];
+
+const DEMO_BOT_REPLY =
+  "[STEP 1 of 2]\n\n" +
+  "Great question! The partial derivative $\\frac{\\partial f}{\\partial x}$ measures how $f$ changes when only $x$ changes.\n\n" +
+  "Step 1: Treat other variables as constants.\n" +
+  "Step 2: Differentiate with respect to $x$.\n\n" +
+  "For example, if $f(x,y) = x^2 y$, then $\\frac{\\partial f}{\\partial x} = 2xy$.";
+
+const DEMO_SUGGESTIONS = [
+  "Can you show me another example?",
+  "What about ∂f/∂y?",
+  "Explain the gradient geometrically",
+];
+
+function TypingIndicator() {
+  return (
+    <div className="cb-msg-row cb-msg-row--bot">
+      <div className="cb-msg-avatar cb-msg-avatar--bot" aria-hidden="true">∂</div>
+      <div className="cb-msg-bubble cb-msg-bubble--bot cb-msg-bubble--typing" aria-label="Tutor is thinking">
+        <span className="cb-dot" /><span className="cb-dot" /><span className="cb-dot" />
+      </div>
+    </div>
+  );
+}
+
+function WelcomeScreen({ topic, onSelect }) {
+  return (
+    <div className="cb-welcome">
+      <div className="cb-welcome-icon" aria-hidden="true">∂</div>
+      <h3 className="cb-welcome-title">Calculus Tutor</h3>
+      <p className="cb-welcome-sub">
+        Ask me anything about <strong>{topic}</strong>.<br />
+        I explain step-by-step with proper notation.
+      </p>
+      <div className="cb-welcome-hints">
+        {WELCOME_PROMPTS.map((q) => (
+          <button key={q} type="button" className="cb-hint-chip" onClick={() => onSelect(q)}>
+            {q}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+// History items function
+function formatHistoryItems(raw) {
+  if (!raw?.length) return [];
+  if (raw[0]?.preview) return raw;
+
+  return raw
+    .filter((m) => m.role === "user")
+    .map((m, i) => ({
+      preview: (m.content || "").slice(0, 72) + ((m.content || "").length > 72 ? "…" : ""),
+      date: m.timestamp ? new Date(m.timestamp).toLocaleDateString() : "",
+      messages: raw.slice(Math.max(0, i * 2 - 1), i * 2 + 3),
+      id: m.id || i,
+    }));
+}
+
+function ChatWindow({ onClose, onActivity }) {
+  const { user } = useAuth();
+  const location = useLocation();
+  const pathname = location.pathname;
+  const { topic } = getTopicContext(pathname);
+
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSymbols, setShowSymbols] = useState(false);
+  const [activeGroup, setActiveGroup] = useState(0);
+  const [tab, setTab] = useState("chat");
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+
+  const bottomRef = useRef(null);
+  const textareaRef = useRef(null);
+  const symbolsRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isLoading, suggestions]);
+
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+  }, [input]);
+
+  useEffect(() => {
+    if (!showSymbols) return;
+    const handler = (e) => {
+      if (symbolsRef.current && !symbolsRef.current.contains(e.target)) setShowSymbols(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showSymbols]);
+
+  const loadHistory = useCallback(async () => {
+    if (!user?.accessToken) return;
+    setHistoryLoading(true);
+    try {
+      const h = await fetchChatHistory(user.accessToken);
+      setHistory(formatHistoryItems(h));
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), role: "error", content: err.message, timestamp: new Date().toISOString() },
+      ]);
+      setTab("chat");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (tab === "history") loadHistory();
+  }, [tab, loadHistory]);
+
+  // const insertSymbol = (symbolText) => {
+  //   const ta = textareaRef.current;
+  //   if (!ta) return;
+  //   const start = ta.selectionStart;
+  //   const end = ta.selectionEnd;
+  //   const before = input.slice(0, start);
+  //   const after = input.slice(end);
+  //   const newVal = before + symbolText + after;
+  //   setInput(newVal);
+  //   requestAnimationFrame(() => {
+  //     ta.focus();
+  //     const pos = start + symbolText.length;
+  //     ta.setSelectionRange(pos, pos);
+  //   });
+  // };
+  const insertSymbol = (symbolText, placeholder) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const wrapped = `$${symbolText}$`;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    const newVal = before + wrapped + after;
+    setInput(newVal);
+
+    requestAnimationFrame(() => {
+      ta.focus();
+      if (placeholder) {
+        // lastIndexOf handles cases like \vec{v} where the letter
+        // also appears in the command name itself ("vec")
+        const localIdx = symbolText.lastIndexOf(placeholder);
+        if (localIdx !== -1) {
+          const selStart = start + 1 + localIdx; // +1 for the leading "$"
+          const selEnd = selStart + placeholder.length;
+          ta.setSelectionRange(selStart, selEnd);
+          return;
+        }
+      }
+      const pos = start + wrapped.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  };
+  const buildHistory = (msgs) =>
+    msgs
+      .slice(-20)
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role, content: m.content }));
+
+  const handleSend = useCallback(async (text) => {
+  const trimmed = (text ?? input).trim();
+  if (!trimmed || isLoading) return;
+
+  const userMsg = {
+    id: Date.now(),
+    role: "user",
+    content: trimmed,
+    timestamp: new Date().toISOString(),
+    userInitial: user?.username?.[0]?.toUpperCase() || "Y",
+  };
+
+  setMessages((prev) => [...prev, userMsg]);
+  setInput("");
+  setSuggestions([]);
+  setIsLoading(true);
+
+  const context = getContextString(pathname);
+  const pageUrl = getPageUrl();
+  const token = user?.accessToken || null;
+  const historyPayload = buildHistory([...messages, userMsg]);
+
+  const botMsgId = Date.now() + 1;
+  let streamedAny = false;
+
+  // Placeholder bot message that fills in as tokens arrive
+  const startBotMessage = () => {
+    setMessages((prev) => [
+      ...prev,
+      { id: botMsgId, role: "assistant", content: "", timestamp: new Date().toISOString(), streaming: true },
+    ]);
+  };
+
+  const appendToken = (chunk) => {
+    if (!streamedAny) {
+      streamedAny = true;
+      startBotMessage();
+    }
+    setMessages((prev) =>
+      prev.map((m) => (m.id === botMsgId ? { ...m, content: m.content + chunk } : m))
+    );
+  };
+
+  try {
+    await sendMessageStream(
+      historyPayload,
+      context,
+      token,
+      pageUrl,
+      appendToken,
+      ({ suggestions: finalSuggestions }) => {
+        setMessages((prev) => {
+          const exists = prev.some((m) => m.id === botMsgId);
+          if (!exists) {
+            return [
+              ...prev,
+              {
+                id: botMsgId,
+                role: "assistant",
+                content: "Sorry, I didn't get a response. Please try again.",
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          }
+          return prev.map((m) => (m.id === botMsgId ? { ...m, streaming: false } : m));
+        });
+        setSuggestions(finalSuggestions || []);
+        setIsLoading(false);
+        onActivity?.();
+      },
+      async () => {
+        // Streaming failed/unavailable — fall back to the original non-streaming call
+        try {
+          const data = await sendMessage(historyPayload, context, token, pageUrl);
+          setMessages((prev) => {
+            const withoutPlaceholder = prev.filter((m) => m.id !== botMsgId);
+            return [
+              ...withoutPlaceholder,
+              {
+                id: botMsgId,
+                role: "assistant",
+                content: data.reply || "Sorry, I didn't get a response. Please try again.",
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          });
+          setSuggestions(data.suggestions || []);
+        } catch (err) {
+          setMessages((prev) => {
+            const withoutPlaceholder = prev.filter((m) => m.id !== botMsgId);
+            return [
+              ...withoutPlaceholder,
+              {
+                id: botMsgId,
+                role: "assistant",
+                content: DEMO_BOT_REPLY,
+                timestamp: new Date().toISOString(),
+              },
+            ];
+          });
+          setSuggestions(DEMO_SUGGESTIONS);
+        } finally {
+          setIsLoading(false);
+          onActivity?.();
+        }
+      }
+    );
+  } catch (err) {
+    setIsLoading(false);
+  }
+}, [input, isLoading, messages, user, pathname, onActivity]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="cb-window" role="dialog" aria-label="Calculus Tutor Chat" aria-modal="true">
+      <div className="cb-window-header">
+        <div className="cb-header-brand">
+          <div className="cb-header-icon" aria-hidden="true">∂</div>
+          <div className="cb-header-info">
+            <span className="cb-header-title">Calculus Tutor</span>
+            <span className="cb-header-topic" title={pathname}>{topic}</span>
+          </div>
+        </div>
+        <div className="cb-header-actions">
+          {user && (
+            <button
+              type="button"
+              className={`cb-tab-btn${tab === "history" ? " cb-tab-btn--active" : ""}`}
+              onClick={() => setTab(tab === "history" ? "chat" : "history")}
+              aria-label="Chat history"
+              title="Past conversations"
+            >
+              ⧖
+            </button>
+          )}
+          <button
+              type="button"
+              className="cb-icon-btn cb-new-chat-btn"
+              onClick={async () => {
+                if (user?.accessToken) {
+                  const newId = await createChatSession(user.accessToken);
+                  setSessionId(newId);
+                } else {
+                  setSessionId(null);
+                }
+                setMessages([]);
+                setSuggestions([]);
+                setInput("");
+              }}
+              title="New Chat"
+              aria-label="Start a new chat"
+            >
+            <span className="cb-new-chat-icon" aria-hidden="true">+</span>
+            <span>New Chat</span>
+          </button>
+          <button type="button" className="cb-icon-btn cb-icon-btn--close" onClick={onClose} aria-label="Close chat">✕</button>
+        </div>
+      </div>
+
+      <div className="cb-topic-bar">
+        <span className="cb-topic-dot" aria-hidden="true" />
+        <span className="cb-topic-text">
+          Studying: <strong>{topic}</strong>
+          <span className="cb-topic-path"> · {pathname}</span>
+        </span>
+        {!user && <span className="cb-guest-note">Guest — history won't be saved</span>}
+      </div>
+
+      {tab === "history" ? (
+        <div className="cb-body">
+          {historyLoading ? (
+            <div className="cb-loading-history">Loading history…</div>
+          ) : history.length === 0 ? (
+            <p className="cb-history-empty">No past conversations yet.</p>
+          ) : (
+            <ul className="cb-history-list">
+              {history.map((session) => (
+                <li
+                  key={session.id}
+                  className="cb-history-item"
+                  onClick={() => {
+                    if (session.messages?.length) setMessages(session.messages);
+                    if (session.id) setSessionId(session.id);
+                    setTab("chat");
+                  }}
+                >
+                  <span className="cb-history-preview">{session.preview}</span>
+                  <span className="cb-history-time">{session.date}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <div className="cb-body" role="log" aria-live="polite" aria-label="Conversation">
+          {messages.length === 0 ? (
+            <WelcomeScreen topic={topic} onSelect={handleSend} />
+          ) : (
+            <>
+              {messages.map((msg, i) => {
+                const isLast = i === messages.length - 1;
+                const isLastBot = isLast && msg.role === "assistant";
+                const showSuggestions = isLastBot && suggestions.length > 0;
+                return (
+                  <div
+                    key={msg.id ?? i}
+                    className={`cb-turn${showSuggestions ? " cb-turn--with-suggestions" : ""}`}
+                  >
+                    <Message
+                      message={{ ...msg, userInitial: user?.username?.[0]?.toUpperCase() }}
+                      showFeedback={!showSuggestions}
+                    />
+                    {showSuggestions && (
+                      <SuggestedQuestions suggestions={suggestions} onSelect={handleSend} disabled={isLoading} />
+                    )}
+                    {showSuggestions && <MessageFeedback className="cb-msg-feedback--after-suggestions" />}
+                  </div>
+                );
+              })}
+              {isLoading && <TypingIndicator />}
+            </>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      )}
+
+      {showSymbols && tab === "chat" && (
+        <div ref={symbolsRef}>
+          <MathSymbolPicker activeGroup={activeGroup} onGroupChange={setActiveGroup} onInsert={insertSymbol} />
+        </div>
+      )}
+
+      {tab === "chat" && (
+          <div className="cb-input-area">
+            {input.trim() && (
+              <div className="cb-input-preview">
+                <span className="cb-input-preview-label">Preview</span>
+                <div className="cb-input-preview-content">
+                  {renderLatexSegments(input, "preview")}
+                </div>
+              </div>
+            )}
+            <div className="cb-input-row">
+              {/* ...unchanged... */}
+            <button
+              type="button"
+              className={`cb-sym-toggle${showSymbols ? " active" : ""}`}
+              onClick={() => setShowSymbols((v) => !v)}
+              aria-label="Math symbols"
+              title="Calculus symbols"
+            >
+              ∑
+            </button>
+            <textarea
+              ref={textareaRef}
+              className="cb-textarea"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask a calculus question…"
+              rows={1}
+              disabled={isLoading}
+              aria-label="Message input"
+            />
+            <button
+              type="button"
+              className="cb-send-btn"
+              onClick={() => handleSend()}
+              disabled={isLoading || !input.trim()}
+              aria-label="Send message"
+            >
+              ↑
+            </button>
+          </div>
+          <div className="cb-input-hint">
+            <kbd>$…$</kbd> inline math · <kbd>$$…$$</kbd> block · tap <strong>∑</strong> for symbols
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default ChatWindow;
+
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/Icons.jsx
+--------------------------------------------------------------------------------
+const stroke = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
+
+export const IconClose = (p) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...stroke} {...p}>
+    <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+  </svg>
+);
+
+export const IconHistory = (p) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...stroke} {...p}>
+    <path d="M3 12a9 9 0 1 0 2.6-6.34" />
+    <path d="M3 3v5h5" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);
+
+export const IconSigma = (p) => (
+  <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} {...p}>
+    <path d="M18 7V5a1 1 0 0 0-1-1H7a1 1 0 0 0-.75 1.66L11 12l-4.75 5.34A1 1 0 0 0 7 19h10a1 1 0 0 0 1-1v-2" />
+  </svg>
+);
+
+export const IconPlus = (p) => (
+  <svg width="13" height="13" viewBox="0 0 24 24" {...stroke} {...p}>
+    <path d="M5 12h14" /><path d="M12 5v14" />
+  </svg>
+);
+
+export const IconSend = (p) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...stroke} {...p}>
+    <path d="m5 12 7-7 7 7" /><path d="M12 19V5" />
+  </svg>
+);
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/MathSymbolPicker.jsx
+--------------------------------------------------------------------------------
+export const SYMBOL_GROUPS = [
+  {
+    label: "Calculus",
+    symbols: [
+      { label: "∂", insert: "\\partial ", title: "Partial derivative" },
+      { label: "∫", insert: "\\int ", title: "Integral" },
+      { label: "∬", insert: "\\iint ", title: "Double integral" },
+      { label: "∭", insert: "\\iiint ", title: "Triple integral" },
+      { label: "∮", insert: "\\oint ", title: "Contour integral" },
+      { label: "∇", insert: "\\nabla ", title: "Gradient / nabla" },
+      { label: "lim", insert: "\\lim_{x \\to a} ", placeholder: "a", title: "Limit" },
+      { label: "∞", insert: "\\infty", title: "Infinity" },
+      { label: "d/dx", insert: "\\frac{d}{dx}", title: "Derivative" },
+      { label: "∂f/∂x", insert: "\\frac{\\partial f}{\\partial x}", title: "Partial ∂f/∂x" },
+      { label: "∑", insert: "\\sum_{i=1}^{n} ", placeholder: "n", title: "Summation" },
+      { label: "∏", insert: "\\prod_{i=1}^{n} ", placeholder: "n", title: "Product" },
+    ],
+  },
+  {
+    label: "Vectors",
+    symbols: [
+      { label: "⟨⟩", insert: "\\langle x, y \\rangle", placeholder: "x, y", title: "Vector" },
+      { label: "→v", insert: "\\vec{v}", placeholder: "v", title: "Vector v" },
+      { label: "‖v‖", insert: "\\|\\vec{v}\\|", placeholder: "v", title: "Magnitude" },
+      { label: "·", insert: "\\cdot", title: "Dot product" },
+      { label: "×", insert: "\\times", title: "Cross product" },
+      { label: "î", insert: "\\hat{i}", title: "Unit i" },
+      { label: "ĵ", insert: "\\hat{j}", title: "Unit j" },
+      { label: "k̂", insert: "\\hat{k}", title: "Unit k" },
+    ],
+  },
+  {
+    label: "Greek",
+    symbols: [
+      { label: "α", insert: "\\alpha", title: "Alpha" },
+      { label: "β", insert: "\\beta", title: "Beta" },
+      { label: "γ", insert: "\\gamma", title: "Gamma" },
+      { label: "δ", insert: "\\delta", title: "Delta" },
+      { label: "ε", insert: "\\epsilon", title: "Epsilon" },
+      { label: "λ", insert: "\\lambda", title: "Lambda" },
+      { label: "μ", insert: "\\mu", title: "Mu" },
+      { label: "π", insert: "\\pi", title: "Pi" },
+      { label: "θ", insert: "\\theta", title: "Theta" },
+      { label: "φ", insert: "\\phi", title: "Phi" },
+      { label: "ρ", insert: "\\rho", title: "Rho" },
+      { label: "σ", insert: "\\sigma", title: "Sigma" },
+    ],
+  },
+  {
+    label: "Structures",
+    symbols: [
+      { label: "a/b", insert: "\\frac{a}{b}", placeholder: "a", title: "Fraction" },
+      { label: "√", insert: "\\sqrt{x}", placeholder: "x", title: "Square root" },
+      { label: "ⁿ√", insert: "\\sqrt[n]{x}", placeholder: "n", title: "nth root" },
+      { label: "x²", insert: "x^{2}", placeholder: "2", title: "Squared" },
+      { label: "xⁿ", insert: "x^{n}", placeholder: "n", title: "Power" },
+      { label: "xₙ", insert: "x_{n}", placeholder: "n", title: "Subscript" },
+      { label: "[ ]", insert: "\\left[ x \\right]", placeholder: "x", title: "Brackets" },
+      { label: "( )", insert: "\\left( x \\right)", placeholder: "x", title: "Parentheses" },
+    ],
+  },
+];
+
+function MathSymbolPicker({ activeGroup, onGroupChange, onInsert }) {
+  return (
+    <div className="cb-symbols-palette">
+      <div className="cb-sym-groups">
+        {SYMBOL_GROUPS.map((g, i) => (
+          <button
+            key={g.label}
+            type="button"
+            className={`cb-sym-group-btn${activeGroup === i ? " active" : ""}`}
+            onClick={() => onGroupChange(i)}
+          >
+            {g.label}
+          </button>
+        ))}
+      </div>
+      <div className="cb-sym-grid">
+        {SYMBOL_GROUPS[activeGroup].symbols.map((s) => (
+          <button
+            key={s.label + s.insert}
+            type="button"
+            className="cb-sym-btn"
+            onClick={() => onInsert(s.insert, s.placeholder)}
+            title={s.title}
+            aria-label={s.title}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default MathSymbolPicker;
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/Message.jsx
+--------------------------------------------------------------------------------
+import { useState, useEffect, useRef } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
+
+
+function parseLatex(text) {
+  const segments = [];
+  const regex = /(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: "text", content: text.slice(lastIndex, match.index) });
+    }
+    const raw = match[0];
+    if (raw.startsWith("$$")) {
+      segments.push({ type: "block", content: raw.slice(2, -2).trim() });
+    } else {
+      segments.push({ type: "inline", content: raw.slice(1, -1).trim() });
+    }
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ type: "text", content: text.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
+function KatexSpan({ latex, displayMode }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    try {
+      katex.render(latex, ref.current, { throwOnError: false, strict: false, displayMode });
+    } catch {
+      ref.current.textContent = latex;
+    }
+  }, [latex, displayMode]);
+
+  return displayMode
+    ? <div ref={ref} className="cb-math-block" />
+    : <span ref={ref} className="cb-math-inline" />;
+}
+
+const STEP_LINE_RE = /^step\s+\d+[:.)]/i;
+
+function cleanBotContent(content) {
+  return content
+    .replace(/\[STEP\s+\d+\s+of\s+\d+\]\s*/i, "")
+    .replace(/\[FOLLOW_UPS\][\s\S]*?\[\/FOLLOW_UPS\]/gi, "")
+    .trim();
+}
+
+function renderLatexSegments(text, keyPrefix) {
+  return parseLatex(text).map((seg, i) => {
+    if (seg.type === "text") return <span key={`${keyPrefix}-${i}`}>{seg.content}</span>;
+    if (seg.type === "inline") return <KatexSpan key={`${keyPrefix}-${i}`} latex={seg.content} displayMode={false} />;
+    if (seg.type === "block") return <KatexSpan key={`${keyPrefix}-${i}`} latex={seg.content} displayMode={true} />;
+    return null;
+  });
+}
+
+function BotMessageContent({ content }) {
+  const cleanedContent = cleanBotContent(content);
+  const blocks = cleanedContent.split(/\n\s*\n/).filter((b) => b.trim());
+
+  return (
+    <div className="cb-msg-text cb-msg-text--structured">
+      {blocks.map((block, bIdx) => {
+        const lines = block.split("\n").filter((l) => l.trim());
+        const isStepList = lines.length > 1 && lines.every((l) => STEP_LINE_RE.test(l.trim()));
+
+        if (isStepList) {
+          return (
+            <ol key={bIdx} className="cb-msg-steps">
+              {lines.map((line, lIdx) => (
+                <li key={lIdx} className="cb-msg-step">
+                  {renderLatexSegments(line.replace(/^step\s+\d+[:.)]\s*/i, ""), `b${bIdx}-l${lIdx}`)}
+                </li>
+              ))}
+            </ol>
+          );
+        }
+
+        return (
+          <p key={bIdx} className="cb-msg-paragraph">
+            {lines.map((line, lIdx) => (
+              <span key={lIdx}>
+                {renderLatexSegments(line, `b${bIdx}-l${lIdx}`)}
+                {lIdx < lines.length - 1 && <br />}
+              </span>
+            ))}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function MessageFeedback({ className = "" }) {
+  const [feedback, setFeedback] = useState(null);
+
+  return (
+    <div className={`cb-msg-feedback${className ? ` ${className}` : ""}`}>
+      <button
+        type="button"
+        className={`cb-feedback-btn${feedback === "like" ? " cb-feedback-btn--active-like" : ""}`}
+        onClick={() => setFeedback((f) => (f === "like" ? null : "like"))}
+        aria-label="Like this response"
+        title="Helpful"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        className={`cb-feedback-btn${feedback === "dislike" ? " cb-feedback-btn--active-dislike" : ""}`}
+        onClick={() => setFeedback((f) => (f === "dislike" ? null : "dislike"))}
+        aria-label="Dislike this response"
+        title="Not helpful"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function Message({ message, showFeedback = true }) {
+  const isUser = message.role === "user";
+  const isError = message.role === "error";
+  const isBot = !isUser && !isError;
+  const stepMatch =
+    message.content?.match(/\[STEP\s+(\d+)\s+of\s+(\d+)\]/i);
+
+  const currentStep = stepMatch
+    ? parseInt(stepMatch[1])
+    : null;
+
+  const totalSteps = stepMatch
+    ? parseInt(stepMatch[2])
+    : null;
+
+  if (isError) {
+    return (
+      <div className="cb-msg-block cb-msg-block--bot">
+        <div className="cb-msg-row cb-msg-row--bot">
+          <div className="cb-msg-avatar cb-msg-avatar--bot" aria-hidden="true">∂</div>
+          <div className="cb-msg-bubble cb-msg-bubble--error">
+            <span className="cb-error-icon" aria-hidden="true">⚠</span>
+            <span className="cb-msg-text">{message.content}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`cb-msg-block${isUser ? " cb-msg-block--user" : " cb-msg-block--bot"}`}>
+      <div className={`cb-msg-row ${isUser ? "cb-msg-row--user" : "cb-msg-row--bot"}`}>
+        {isBot && <div className="cb-msg-avatar cb-msg-avatar--bot" aria-hidden="true">∂</div>}
+        <div className={`cb-msg-bubble ${isUser ? "cb-msg-bubble--user" : "cb-msg-bubble--bot"}`}>
+          {isUser ? (
+            <div className="cb-msg-text">
+              {message.content.split("\n").map((line, i, arr) => (
+                <span key={i}>
+                  {renderLatexSegments(line, `u-${i}`)}
+                  {i < arr.length - 1 && <br />}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <>
+              {currentStep && totalSteps && (
+                <div className="cb-progress-container">
+                  <div className="cb-progress-label">
+                    Step {currentStep} of {totalSteps}
+                  </div>
+
+                  <div className="cb-progress-bar">
+                    <div
+                      className="cb-progress-fill"
+                      style={{
+                        width: `${(currentStep / totalSteps) * 100}%`
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              <BotMessageContent content={message.content} />
+              {currentStep === totalSteps && (
+                <div className="cb-complete-badge">
+                  🏆 Problem solved!
+                </div>
+              )}
+
+            </>
+        )}
+          {message.timestamp && (
+            <span className="cb-msg-time">
+              {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+        {isUser && (
+          <div className="cb-msg-avatar cb-msg-avatar--user" aria-hidden="true">
+            {message.userInitial || "U"}
+          </div>
+        )}
+      </div>
+      {isBot && showFeedback && <MessageFeedback />}
+    </div>
+  );
+}
+
+export { MessageFeedback, renderLatexSegments };
+export default Message;
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/ProblemTracker.jsx
+--------------------------------------------------------------------------------
+function ProblemTracker({ content }) {
+
+  // Find all "Step X" occurrences
+  const steps =
+    content.match(/Step\s+\d+:/gi) || [];
+
+  const totalSteps = steps.length;
+
+  // If no steps exist, don't show tracker
+  if (totalSteps === 0) return null;
+
+  // Assume all detected steps are complete
+  const completedSteps = totalSteps;
+
+  const progress =
+    Math.round(
+      (completedSteps / totalSteps) * 100
+    );
+
+  return (
+    <div className="cb-problem-tracker">
+
+      <div className="cb-progress-header">
+        Problem Progress
+      </div>
+
+      <div className="cb-progress-bar">
+        <div
+          className="cb-progress-fill"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      <div className="cb-progress-text">
+        {progress}% Complete
+      </div>
+
+      <ul className="cb-step-list">
+        {steps.map((step, index) => (
+          <li
+            key={index}
+            className="cb-step-item"
+          >
+            ✓ {step}
+          </li>
+        ))}
+      </ul>
+
+      {progress === 100 && (
+        <div className="cb-completion-badge">
+          🏆 Solution Complete
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+export default ProblemTracker;
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Chatbot/SuggestedQuestions.jsx
+--------------------------------------------------------------------------------
+import React from "react";
+
+/**
+ * SuggestedQuestions — displays AI-generated follow-up questions
+ *
+ * Props:
+ *   - suggestions: array of strings (from LLM's [FOLLOW_UPS] block)
+ *   - onSelect: function(question) — fires when user clicks a suggestion
+ *   - disabled: boolean — disables buttons while loading
+ */
+const SuggestedQuestions = ({ suggestions = [], onSelect, disabled = false }) => {
+  if (!suggestions || suggestions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="cb-suggestions" role="group" aria-label="Suggested next steps">
+      <div className="cb-suggestions-divider" aria-hidden="true" />
+      <div className="cb-suggestions-header">
+        <span className="cb-suggestions-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+          </svg>
+        </span>
+        <span className="cb-suggestions-label">What would you like to explore next?</span>
+      </div>
+      <div className="cb-suggestions-chips">
+        {suggestions.map((question, index) => (
+          <button
+            key={index}
+            className="cb-chip cb-chip--action"
+            style={{ animationDelay: `${index * 70 + 120}ms` }}
+            onClick={() => onSelect(question)}
+            disabled={disabled}
+            type="button"
+          >
+            <span className="cb-chip-icon" aria-hidden="true">↗</span>
+            <span className="cb-chip-text">{question}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default SuggestedQuestions;
+
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Dashboard/Dashboard.css
+--------------------------------------------------------------------------------
+.dashboard-container {
+    padding: 2rem;
+}
+
+.dashboard-title {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-bottom: 3rem;
+}
+
+.stat-card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.stat-card h3 {
+    margin-bottom: 10px;
+}
+
+.stat-card p {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #d4af37;
+}
+
+.chart-section {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.topic-row {
+    margin: 20px 0;
+}
+
+.progress-track {
+    width: 100%;
+    height: 18px;
+    background: #eee;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-top: 8px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(to right, #d4af37, #f7d358);
+    border-radius: 20px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Dashboard/Dashboard.jsx
+--------------------------------------------------------------------------------
+import "./Dashboard.css";
+
+function Dashboard() {
+
+  // Mock data for now
+  const stats = [
+    { title: "Total Questions", value: 1245 },
+    { title: "Active Users", value: 238 },
+    { title: "Positive Feedback", value: "92%" },
+    { title: "Avg Session Length", value: "8 min" }
+  ];
+
+  return (
+    <div className="dashboard-container">
+
+      <h1 className="dashboard-title">
+        Admin Analytics Dashboard
+      </h1>
+
+      <div className="stats-grid">
+        {stats.map((stat, index) => (
+          <div className="stat-card" key={index}>
+            <h3>{stat.title}</h3>
+            <p>{stat.value}</p>
+          </div>
+        ))}
+      </div>
+        
+      <div className="chart-section">
+        <h2>Most Asked Topics</h2>
+
+        <div className="topic-row">
+          <span>Limits</span>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: "90%" }}></div>
+          </div>
+        </div>
+
+        <div className="topic-row">
+          <span>Integration</span>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: "75%" }}></div>
+          </div>
+        </div>
+
+        <div className="topic-row">
+          <span>Derivatives</span>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: "60%" }}></div>
+          </div>
+        </div>
+
+        <div className="topic-row">
+          <span>Lagrange Multipliers</span>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: "45%" }}></div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+export default Dashboard;
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/components/Layout.jsx
+--------------------------------------------------------------------------------
+import { useState, useEffect } from "react";
+import Header from "./Header";
+import Footer from "./Footer";
+import Chatbot from "./Chatbot/Chatbot";
+
+function Layout(props) {
+  const [darkMode, setDarkMode] = useState(() => {
+    try {
+      return localStorage.getItem("calculus-dark") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.setAttribute("data-theme", "dark");
+      root.classList.add("dark");
+    } else {
+      root.setAttribute("data-theme", "light");
+      root.classList.remove("dark");
+    }
+    try {
+      localStorage.setItem("calculus-dark", String(darkMode));
+    } catch {}
+  }, [darkMode]);
+
+  const toggle = () => setDarkMode((v) => !v);
+
+  return (
+    <>
+      <Header darkMode={darkMode} onToggleDark={toggle} />
+      {props.body}
+      <Footer />
+      <Chatbot />
+    </>
+  );
+}
+
+export default Layout;
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/context/AuthContext.js
+--------------------------------------------------------------------------------
+import { createContext, useContext, useState } from "react";
+
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  // null = guest. For history-tab testing, set a fake user:
+  //user data
+  // const [user] = useState({ username: "hassan", accessToken: "test-token" });
+  const [user] = useState(null);
+
+  return (
+    <AuthContext.Provider value={{ user, login: () => {}, logout: () => {}, signup: () => {} }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/services/chatApi.js
+--------------------------------------------------------------------------------
+/**
+ * chatApi.js — Objectives CB-1, CB-4
+ *
+ * Integrated (default):  POST {API_URL}/api/chat
+ *                        GET  {API_URL}/api/chat/history
+ * Standalone (Beanie):   POST {REACT_APP_CHAT_URL}/chat
+ */
+
+const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8002";
+const STANDALONE_CHAT_URL = process.env.REACT_APP_CHAT_URL || "";
+const REQUEST_TIMEOUT_MS = 45000;
+
+function getChatEndpoint() {
+  if (STANDALONE_CHAT_URL) {
+    return `${STANDALONE_CHAT_URL.replace(/\/$/, "")}/chat`;
+  }
+  return `${API_URL}/api/chat`;
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("The tutor is taking too long. Please try again in a moment.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * @param {Array<{role: string, content: string}>} messages
+ * @param {string} context
+ * @param {string|null} token
+ * @param {string} pageUrl
+ */
+export async function sendMessage(messages, context, token = null, pageUrl = "/") {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetchWithTimeout(getChatEndpoint(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ messages, context, page_url: pageUrl }),
+    });
+  } catch (err) {
+    if (err.message.includes("taking too long")) throw err;
+    throw new Error("Could not reach the chat service. Make sure the backend is running.");
+  }
+
+  if (!response.ok) {
+    let detail = "Chat request failed.";
+    try {
+      const err = await response.json();
+      detail = err.detail || err.message || detail;
+    } catch {}
+    throw new Error(typeof detail === "string" ? detail : "Chat request failed.");
+  }
+
+  try {
+    const data = await response.json();
+    return {
+      reply: data.reply || data.response || "",
+      suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+    };
+  } catch {
+    throw new Error("Invalid response from chat service.");
+  }
+}
+/**
+ * sendMessageStream — CB-10 (Frontend streaming)
+ * Streams tokens from {API_URL}/api/chat/stream (or standalone /chat/stream)
+ * via SSE-over-fetch. Falls back gracefully if the endpoint isn't available yet.
+ *
+ * @param {Array<{role: string, content: string}>} messages
+ * @param {string} context
+ * @param {string|null} token
+ * @param {string} pageUrl
+ * @param {(chunk: string) => void} onToken - called with each new text chunk
+ * @param {(final: {suggestions: string[]}) => void} onDone - called once stream ends
+ * @param {(err: Error) => void} onError
+ */
+export async function sendMessageStream(
+  messages,
+  context,
+  token = null,
+  pageUrl = "/",
+  onToken = () => {},
+  onDone = () => {},
+  onError = () => {}
+) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const streamUrl = getChatEndpoint().replace(/\/chat$/, "/chat/stream");
+
+  let response;
+  try {
+    response = await fetch(streamUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ messages, context, page_url: pageUrl }),
+    });
+  } catch (err) {
+    onError(new Error("Could not reach the chat service. Make sure the backend is running."));
+    return;
+  }
+
+  if (!response.ok || !response.body) {
+    onError(new Error("Streaming not available. Falling back."));
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let suggestions = [];
+
+  try {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop(); // keep incomplete chunk for next read
+
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const payload = line.replace(/^data:\s*/, "");
+
+        if (payload === "[DONE]") {
+          onDone({ suggestions });
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.token) onToken(parsed.token);
+          if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions;
+        } catch {
+          // plain-text token fallback (not JSON-wrapped)
+          if (payload) onToken(payload);
+        }
+      }
+    }
+    onDone({ suggestions });
+  } catch (err) {
+    onError(new Error("Stream interrupted. Please try again."));
+  }
+}
+
+/**
+ * createChatSession — CB-13
+ * Creates a new backend session for logged-in users. Guests skip this
+ * (handled by caller) since guest sessions aren't persisted.
+ * NOTE: relies on POST {API_URL}/api/chat/sessions — confirm with backend
+ * owner whether this route exists yet.
+ */
+export async function createChatSession(token, title = "New Chat") {
+  if (!token) return null;
+  try {
+    const response = await fetchWithTimeout(`${API_URL}/api/chat/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ title }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.session_id || data.id || null;
+  } catch {
+    return null; // fail silently — local reset still works
+  }
+}
+export async function fetchChatHistory(token) {
+  if (!token) return [];
+
+  let response;
+  try {
+    response = await fetchWithTimeout(`${API_URL}/api/chat/history`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (err) {
+    if (err.message.includes("taking too long")) throw err;
+    throw new Error("Could not reach the backend server.");
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) throw new Error("Session expired. Please log in again.");
+    throw new Error("Failed to load chat history.");
+  }
+
+  try {
+    const data = await response.json();
+    return data.history || data.sessions || [];
+  } catch {
+    return [];
+  }
+}
+
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/utils/routeContext.js
+--------------------------------------------------------------------------------
+/**
+ * routeContext.js — Objective CB-5
+ * Reads pathname + maps to topic; full URL is sent with every chat request.
+ */
+
+const ROUTE_MAP = [
+  { match: /\/partial-derivatives\/2/, topic: "Partial Derivatives Part 2", detail: "higher-order partials, mixed partials, chain rule for multivariable functions" },
+  { match: /\/partial-derivatives\/1/, topic: "Partial Derivatives Part 1", detail: "definition of partial derivatives, notation, geometric interpretation" },
+  { match: /\/partial-derivatives/, topic: "Partial Derivatives", detail: "partial derivatives and related concepts" },
+  { match: /\/vector-calculus\/2/, topic: "Vector Calculus Part 2", detail: "curl, divergence, Stokes theorem, divergence theorem" },
+  { match: /\/vector-calculus\/1/, topic: "Vector Calculus Part 1", detail: "vector fields, line integrals, gradient, flux" },
+  { match: /\/vector-calculus/, topic: "Vector Calculus", detail: "vector calculus topics" },
+  { match: /\/limits-continuity\/2/, topic: "Limits and Continuity Part 2", detail: "continuity of multivariable functions, continuity on regions" },
+  { match: /\/limits-continuity\/1/, topic: "Limits and Continuity Part 1", detail: "limits of multivariable functions, path-dependent limits" },
+  { match: /\/limits-continuity/, topic: "Limits and Continuity", detail: "limits and continuity for multivariable functions" },
+  { match: /\/multiple-integrals\/2/, topic: "Multiple Integrals Part 2", detail: "change of variables, Jacobians, polar, cylindrical and spherical coordinates" },
+  { match: /\/multiple-integrals\/1/, topic: "Multiple Integrals Part 1", detail: "double integrals, iterated integrals, Fubini's theorem" },
+  { match: /\/multiple-integrals/, topic: "Multiple Integrals", detail: "double and triple integrals" },
+  { match: /\/simple-concepts\/[^/]+/, topic: "Simple Concepts (detail page)", detail: "interactive concept exploration" },
+  { match: /\/simple-concepts/, topic: "Simple Concepts", detail: "functions of several variables, level curves, surfaces in 3D" },
+  { match: /\/test/, topic: "Continuity Finder Tool", detail: "testing continuity of multivariable functions" },
+  { match: /\/extreme/, topic: "Extreme Value Finder Tool", detail: "critical points, second derivative test, saddle points" },
+  { match: /\/volumecalculator/, topic: "Volume Calculator Tool", detail: "volumes using double and triple integrals" },
+  { match: /\/ai-solver/, topic: "AI Solver", detail: "symbolic computation for calculus problems" },
+  { match: /\/dashboard/, topic: "Dashboard", detail: "student progress and saved work" },
+  { match: /\/login/, topic: "Login", detail: "account sign-in" },
+  { match: /\/signup/, topic: "Sign Up", detail: "account registration" },
+  { match: /^\/$/, topic: "Home", detail: "general multivariable calculus overview" },
+];
+
+export function getPageUrl() {
+  if (typeof window === "undefined") return "/";
+  return window.location.pathname;
+}
+
+export function getTopicContext(pathname = getPageUrl()) {
+  for (const entry of ROUTE_MAP) {
+    if (entry.match.test(pathname)) {
+      return { topic: entry.topic, detail: entry.detail };
+    }
+  }
+  return { topic: "Multivariable Calculus", detail: "general multivariable calculus topics" };
+}
+
+/** Full context string injected into every LLM request */
+export function getContextString(pathname = getPageUrl()) {
+  const { topic, detail } = getTopicContext(pathname);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const fullUrl = `${origin}${pathname}`;
+  return (
+    `The student is currently on CalcVoyager page ${pathname} (full URL: ${fullUrl}). ` +
+    `Topic: "${topic}". Focus: ${detail}.`
+  );
+}
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/App.js
+--------------------------------------------------------------------------------
+import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
+import Chatbot from "./components/Chatbot/Chatbot";
+import "./index.css";
+import Dashboard from "./components/Dashboard/Dashboard";
+
+
+function DemoPage({ title }) {
+    return (
+      <main style={{ padding: "2rem", maxWidth: 720, margin: "0 auto" }}>
+        <h1 style={{ marginTop: 0 }}>{title}</h1>
+        <nav style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginTop: "1.5rem" }}>
+          <Link to="/">Home</Link>
+          <Link to="/partial-derivatives/1">Partial Derivatives</Link>
+          <Link to="/vector-calculus/1">Vector Calculus</Link>
+          <Link to="/limits-continuity/1">Limits</Link>
+          <Link to="/ai-solver">AI Solver</Link>
+          <Link to="/dashboard">Dashboard</Link>
+        </nav>
+        <p style={{ marginTop: "2rem", fontSize: "0.85rem", color: "var(--muted)" }}>
+          Change page → topic bar in chat should update (CB-5).
+        </p>
+      </main>
+    );
+  }
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<DemoPage title="Home — CalcVoyager Demo" />} />
+          <Route path="/partial-derivatives/1" element={<DemoPage title="Partial Derivatives Part 1" />} />
+          <Route path="/vector-calculus/1" element={<DemoPage title="Vector Calculus Part 1" />} />
+          <Route path="/limits-continuity/1" element={<DemoPage title="Limits & Continuity Part 1" />} />
+          <Route path="/ai-solver" element={<DemoPage title="AI Solver" />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+        </Routes>
+        <Chatbot />
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/index.css
+--------------------------------------------------------------------------------
+:root {
+    --ink: #111317;
+    --ink-2: #20252c;
+    --paper: #fbf7ef;
+    --paper-2: #f1eadf;
+    --card: #fffdf8;
+    --line: #ded2bf;
+    --muted: #665f56;
+    --gold: #c28a2e;
+    --gold-2: #f0c66f;
+    --teal: #2f746b;
+    --shadow-hard: 0 24px 80px rgba(17, 19, 23, 0.18);
+  }
+  
+  [data-theme="dark"] {
+    --ink: #f0ece3;
+    --paper: #111009;
+    --paper-2: #1a160d;
+    --card: #1e1a11;
+    --line: #3a3020;
+    --muted: #9a917f;
+    --gold: #d4a248;
+    --teal: #4a9e93;
+    --shadow-hard: 0 24px 80px rgba(0, 0, 0, 0.5);
+  }
+  
+  * { box-sizing: border-box; }
+  
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/index.js
+--------------------------------------------------------------------------------
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+--------------------------------------------------------------------------------
+FILE: /frontend/src/main.jsx
+--------------------------------------------------------------------------------
+
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import Chatbot from './components/Chatbot/Chatbot'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <div style={{ 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      height: '100vh',
+      backgroundColor: '#f9fafb'
+    }}>
+      <Chatbot />
+    </div>
+  </React.StrictMode>
+)
+
+--------------------------------------------------------------------------------
+FILE: /frontend/index.html
+--------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Calculus AI Chatbot</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+
+--------------------------------------------------------------------------------
+FILE: /frontend/package-lock.json
+--------------------------------------------------------------------------------
+[file too large: 758.5 KB – skipped]
+
+--------------------------------------------------------------------------------
+FILE: /frontend/package.json
+--------------------------------------------------------------------------------
+{
+    "name": "calculus-chatbot-widget",
+    "version": "0.1.0",
+    "private": true,
+    "dependencies": {
+      "katex": "^0.16.28",
+      "react": "^19.2.4",
+      "react-dom": "^19.2.4",
+      "react-router-dom": "^7.13.0",
+      "react-scripts": "5.0.1"
+    },
+    "scripts": {
+      "start": "react-scripts start",
+      "build": "react-scripts build"
+    },
+    "browserslist": {
+      "production": [">0.2%", "not dead", "not op_mini all"],
+      "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    }
+  }
+
+
+--------------------------------------------------------------------------------
+FILE: /frontend/vite.config.js
+--------------------------------------------------------------------------------
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+})
+
+--------------------------------------------------------------------------------
+FILE: /.gitignore
+--------------------------------------------------------------------------------
+# Python
+
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+
+venv/
+env/
+ENV/
+.venv/
+
+# Environment Variables
+
+.env
+.env.local
+.env.development
+.env.production
+
+# FastAPI / Python Build Files
+
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs
+
+*.log
+logs/
+
+# Database
+
+*.db
+*.sqlite
+*.sqlite3
+
+# Testing
+
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+
+.ipynb_checkpoints/
+
+# React / Node
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# React Build Output
+
+frontend/build/
+frontend/dist/
+dist/
+
+# Vite
+
+.vite/
+
+# IDEs
+
+.vscode/
+.idea/
+
+# OS Files
+
+.DS_Store
+Thumbs.db
+
+# Temporary Files
+
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Coverage Reports
+
+coverage/
+*.lcov
+
+# Cache
+
+.cache/
+
+# Secrets
+
+*.pem
+*.key
+*.crt
+
+# Docker (if used later)
+
+docker-compose.override.yml
+
+# Misc
+
+*.bak
+*.orig
+*.rej
+. e n v  
+ 
+
+--------------------------------------------------------------------------------
+FILE: /README.md
+--------------------------------------------------------------------------------
+# CalcVoyager AI Chatbot
+
+An intelligent AI-powered calculus tutoring chatbot designed for the **CalcVoyager** learning platform. The chatbot provides step-by-step explanations, contextual learning assistance, mathematical notation rendering, conversation history, and topic-aware responses to help students master multivariable calculus concepts.
+
+---
+
+## 🚀 Features
+
+### 📚 Calculus Tutoring
+- Answers questions related to:
+  - Partial Derivatives
+  - Vector Calculus
+  - Limits & Continuity
+  - Gradients
+  - Lagrange Multipliers
+  - Multivariable Functions
+  - Other CalcVoyager topics
+
+### 📝 Step-by-Step Explanations
+- Guides students through solutions instead of only providing answers.
+- Encourages conceptual understanding and critical thinking.
+
+### 🧮 Mathematical Notation Rendering
+- Uses LaTeX for mathematical expressions.
+- Frontend renders equations using KaTeX.
+
+Example:
+
+```latex
+\nabla f = \left\langle \frac{\partial f}{\partial x}, \frac{\partial f}{\partial y} \right\rangle
+
+💬 Conversation Memory
+Maintains context across conversations.
+Stores the last 10 conversation turns for improved continuity.
+🎯 Topic-Aware Responses
+Automatically detects the page/topic the student is studying.
+Tailors explanations based on current learning context.
+🔄 Suggested Follow-Up Questions
+
+Examples:
+
+Can you show another example?
+Why does this step work?
+What's the difference between this and a regular derivative?
+👤 User Authentication Support
+Logged-in users get persistent chat history.
+Guest users can chat without account requirements.
+⚠ Error Handling
+Graceful handling of:
+API failures
+Slow responses
+Network issues
+Provides user-friendly fallback messages.
+Team Theta
+
+AI Chatbot Team for CalcVoyager
+
+Building an intelligent, educational, and student-focused calculus tutoring experience.
+
+================================================================================
+END OF FOLDER: Calculus-AI-Chatbot
+================================================================================

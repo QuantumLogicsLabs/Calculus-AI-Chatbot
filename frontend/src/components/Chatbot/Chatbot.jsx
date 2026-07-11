@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import ChatWindow from "./ChatWindow";
 import { IconClose } from "./Icons";
 import "./Chatbot.css";
@@ -6,6 +6,8 @@ import "./Chatbot.css";
 function Chatbot() {
   const [isOpen, setIsOpen] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
+  const bubbleRef = useRef(null);
+  const wasOpenRef = useRef(isOpen);
 
   useEffect(() => {
     const handler = (e) => {
@@ -13,6 +15,17 @@ function Chatbot() {
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
+  }, [isOpen]);
+
+  // CB-21: whenever the panel goes from open -> closed (Escape, the
+  // in-panel close button, or backdrop click), send keyboard focus back
+  // to the trigger bubble instead of letting it fall off the unmounted
+  // panel and get lost.
+  useEffect(() => {
+    if (wasOpenRef.current && !isOpen) {
+      bubbleRef.current?.focus();
+    }
+    wasOpenRef.current = isOpen;
   }, [isOpen]);
 
   useEffect(() => {
@@ -37,6 +50,7 @@ function Chatbot() {
         )}
   
         <button
+          ref={bubbleRef}
           type="button"
           className={`cb-bubble${isOpen ? " cb-bubble--open" : ""}`}
           onClick={() => {

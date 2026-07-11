@@ -1,16 +1,25 @@
 # routers/chat.py - Complete chat implementation for Starlette
 import json
+import re
 import uuid
 import httpx
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 # from auth_utils import require_user
 from backend.app.auth.auth_utils import require_user
 # from db import fetchone, fetchall, execute, scalar
-from backend.app.database.db import fetchone, fetchall, execute, scalar, upsert_feedback, get_feedback_for_message  # CB-12# Configuration for aiService
+from backend.app.database.db import (
+    fetchone, fetchall, execute, scalar,
+    upsert_feedback, get_feedback_for_message,  # CB-12
+    get_topic_progress, get_all_topic_progress,  # CB-18
+    record_topic_message, record_topic_feedback,  # CB-18
+)
+
+# Configuration for aiService
 AI_SERVICE_URL = "http://127.0.0.1:8001"  # aiService chatbot.py runs on port 8001
 
 # ── Helper Functions ──────────────────────────────────────────────────────────
@@ -33,6 +42,76 @@ async def validate_session(user_id: int, session_id: str) -> Optional[Dict[str, 
 def json_response(data, status=200):
     """Helper for consistent JSON responses"""
     return JSONResponse(data, status_code=status)
+
+
+def _fmt_ts(ts) -> str:
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return ""
+
+
+def build_study_sheet(session: Dict[str, Any], messages: list) -> str:
+    """
+    CB-19 — Turns a session's raw message log into a revision-ready
+    Markdown study sheet: a "key formulas" digest pulled from every
+    display-LaTeX block ($$...$$) the tutor produced, followed by the
+    full Q&A trail in chronological order.
+    """
+    title = session.get("title") or "Study Session"
+    created = _fmt_ts(session.get("created_at"))
+    updated = _fmt_ts(session.get("updated_at"))
+
+    lines = [
+        f"# {title}",
+        "",
+        f"_Exported from CalcVoyager · started {created} · last active {updated}_",
+        "",
+        "---",
+        "",
+    ]
+
+    # ── Key formulas & definitions digest ──────────────────────────────────
+    formula_pattern = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
+    seen = set()
+    formulas = []
+    for msg in messages:
+        if msg.get("message_type") != "assistant":
+            continue
+        for match in formula_pattern.findall(msg.get("content", "")):
+            cleaned = match.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                formulas.append(cleaned)
+
+    if formulas:
+        lines.append("## 📐 Key Formulas & Results")
+        lines.append("")
+        for f in formulas:
+            lines.append(f"- $${f}$$")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # ── Full conversation trail ─────────────────────────────────────────────
+    lines.append("## 💬 Full Conversation")
+    lines.append("")
+
+    for msg in messages:
+        role = msg.get("message_type")
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        if role == "user":
+            lines.append(f"**Q:** {content}")
+        elif role == "assistant":
+            lines.append(f"**Cal:** {content}")
+        else:
+            continue
+        lines.append("")
+
+    return "\n".join(lines)
+
 
 # ── Endpoint Handlers ─────────────────────────────────────────────────────────
 
@@ -292,19 +371,23 @@ async def chat_endpoint(request: Request):
     """
     POST /api/chat - Main chat endpoint that combines LLM calls with DB storage
 
-    Accepts: { messages, context, page_url }
-    Returns: { reply, suggestions, message_id }
+    Accepts: { messages, context, topic_key, page_url }
+    Returns: { reply, suggestions, message_id, difficulty }
 
-    If authenticated: saves user message and assistant reply to DB
+    If authenticated: saves user message and assistant reply to DB, and
+    updates the CB-18 adaptive-difficulty tracker for the topic.
     """
     try:
         body = await request.json()
     except Exception:
         return json_response({"detail": "Invalid JSON body"}, 400)
 
-    messages = body.get('messages', [])
-    context  = body.get('context', '')
-    page_url = body.get('page_url', '/')
+    messages  = body.get('messages', [])
+    context   = body.get('context', '')
+    # CB-18: short, stable topic key for progress tracking (distinct from the
+    # long descriptive `context` string that gets fed to the LLM as flavor text)
+    topic_key = (body.get('topic_key') or context or 'general').strip().lower()
+    page_url  = body.get('page_url', '/')
 
     if not messages:
         return json_response({"detail": "messages array is required"}, 400)
@@ -327,6 +410,17 @@ async def chat_endpoint(request: Request):
     except Exception:
         pass  # Guest user
 
+    # CB-18: look up the student's current difficulty level for this topic.
+    # Guests have no persisted history, so they always get the default.
+    difficulty_level = "intermediate"
+    if user_id:
+        try:
+            progress = await get_topic_progress(user_id, topic_key)
+            difficulty_level = progress.get("difficulty_level", "intermediate")
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to load topic progress: {str(e)}")
+
     # Call the aiService chatbot
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
@@ -335,6 +429,7 @@ async def chat_endpoint(request: Request):
                 json={
                     "message": user_message,
                     "topic": context or "",
+                    "difficulty": difficulty_level,  # CB-18
                     "history": messages[:-1] if len(messages) > 1 else []
                 }
             )
@@ -384,16 +479,17 @@ async def chat_endpoint(request: Request):
             else:
                 session_id = active_session['session_id']
 
-            # Save user message
+            # Save user message (CB-18: tag with topic_key for later linkage)
             await execute(
                 "INSERT INTO chat_messages (user_id, session_id, message_type, content, metadata) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (user_id, session_id, 'user', user_message, json.dumps({"page_url": page_url}))
+                (user_id, session_id, 'user', user_message,
+                 json.dumps({"page_url": page_url, "topic": topic_key}))
             )
 
             # Save assistant reply
             # FIX: capture the rowid directly so we can return message_id to the frontend
-            metadata = {"page_url": page_url}
+            metadata = {"page_url": page_url, "topic": topic_key}
             if suggestions:
                 metadata["suggestions"] = suggestions
 
@@ -408,6 +504,14 @@ async def chat_endpoint(request: Request):
                 "UPDATE chat_sessions SET updated_at = strftime('%s','now') WHERE session_id = ?",
                 (session_id,)
             )
+
+            # CB-18: log this turn against the topic's adaptive-difficulty tracker
+            try:
+                updated_progress = await record_topic_message(user_id, topic_key)
+                difficulty_level = updated_progress.get("difficulty_level", difficulty_level)
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to update topic progress: {str(e)}")
         except Exception as e:
             # Log error but don't fail the request - user still gets their answer
             import logging
@@ -415,9 +519,10 @@ async def chat_endpoint(request: Request):
 
     # FIX: include message_id in response so frontend can submit CB-12 feedback
     return json_response({
-        "reply":      reply,
+        "reply":       reply,
         "suggestions": suggestions,
-        "message_id": assistant_message_id  # None for guests; frontend should handle both
+        "message_id":  assistant_message_id,  # None for guests; frontend should handle both
+        "difficulty":  difficulty_level        # CB-18
     })
 
 
@@ -427,6 +532,8 @@ async def submit_feedback(request: Request):
     """
     POST /api/chat/feedback
     CB-12 — Persist thumbs-up / thumbs-down votes from authenticated users.
+    Also feeds CB-18's adaptive-difficulty tracker: a like nudges the
+    topic's level up, a dislike pulls it back down.
 
     Request body (JSON):
         {
@@ -475,7 +582,7 @@ async def submit_feedback(request: Request):
     # Verify the message exists and belongs to this user's session
     message = await fetchone(
         """
-        SELECT cm.id, cm.user_id, cm.session_id
+        SELECT cm.id, cm.user_id, cm.session_id, cm.metadata
         FROM   chat_messages cm
         JOIN   chat_sessions  cs ON cs.session_id = cm.session_id
         WHERE  cm.id         = ?
@@ -502,6 +609,16 @@ async def submit_feedback(request: Request):
 
     saved = await get_feedback_for_message(message_id, user_id)
 
+    # CB-18: feed this rating into the topic's adaptive-difficulty tracker
+    try:
+        msg_topic = "general"
+        if message.get("metadata"):
+            msg_topic = json.loads(message["metadata"]).get("topic", "general")
+        await record_topic_feedback(user_id, msg_topic, feedback)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to update topic progress from feedback: {str(e)}")
+
     return json_response({
         "success": True,
         "data": {
@@ -512,16 +629,84 @@ async def submit_feedback(request: Request):
     })
 
 
+# ── CB-18: Adaptive Difficulty Endpoints ──────────────────────────────────────
+
+async def get_progress(request: Request):
+    """GET /api/chat/progress - every topic's tracked difficulty level for this student"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    progress = await get_all_topic_progress(user_id)
+    return json_response({"success": True, "data": progress})
+
+
+async def get_topic_progress_endpoint(request: Request):
+    """GET /api/chat/progress/{topic} - difficulty level for a single topic"""
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    topic = request.path_params.get('topic')
+    if not topic:
+        return json_response({"detail": "topic required"}, 400)
+
+    progress = await get_topic_progress(user_id, topic)
+    return json_response({"success": True, "data": progress})
+
+
+# ── CB-19: Session Export & Study Sheet Generation ────────────────────────────
+
+async def export_session(request: Request):
+    """
+    GET /api/chat/sessions/{session_id}/export
+    Compiles the session's message history into a downloadable Markdown
+    study sheet: a "key formulas" digest pulled from display-LaTeX blocks,
+    followed by the full Q&A trail.
+    """
+    user_id = await get_user_id(request)
+    if isinstance(user_id, JSONResponse):
+        return user_id
+
+    session_id = request.path_params.get('session_id')
+    if not session_id:
+        return json_response({"detail": "session_id required"}, 400)
+
+    session = await validate_session(user_id, session_id)
+    if not session:
+        return json_response({"detail": "Session not found"}, 404)
+
+    messages = await fetchall(
+        "SELECT message_type, content, created_at FROM chat_messages "
+        "WHERE user_id = ? AND session_id = ? ORDER BY created_at ASC",
+        (user_id, session_id)
+    )
+
+    study_sheet = build_study_sheet(session, messages)
+    safe_title = re.sub(
+        r"[^a-zA-Z0-9\-_]+", "_", (session.get("title") or "study-sheet")
+    ).strip("_") or "study-sheet"
+
+    return Response(
+        content=study_sheet,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.md"'}
+    )
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 routes = [
-    Route("/chat",                           chat_endpoint,            methods=["POST"]),
-    Route("/sessions",                       create_session,           methods=["POST"]),
-    Route("/sessions",                       get_sessions,             methods=["GET"]),
-    Route("/sessions/{session_id}",          update_session_title,     methods=["PUT"]),
-    Route("/sessions/{session_id}",          delete_session,           methods=["DELETE"]),
-    Route("/messages",                       save_message,             methods=["POST"]),
-    Route("/history/{session_id}",           get_conversation_history, methods=["GET"]),
-    Route("/sessions/{session_id}/messages", get_session_messages,     methods=["GET"]),
-    Route("/feedback",                       submit_feedback,          methods=["POST"]),  # CB-12
+    Route("/chat",                           chat_endpoint,              methods=["POST"]),
+    Route("/sessions",                       create_session,             methods=["POST"]),
+    Route("/sessions",                       get_sessions,               methods=["GET"]),
+    Route("/sessions/{session_id}",          update_session_title,       methods=["PUT"]),
+    Route("/sessions/{session_id}",          delete_session,             methods=["DELETE"]),
+    Route("/messages",                       save_message,               methods=["POST"]),
+    Route("/history/{session_id}",           get_conversation_history,   methods=["GET"]),
+    Route("/sessions/{session_id}/messages", get_session_messages,       methods=["GET"]),
+    Route("/sessions/{session_id}/export",   export_session,             methods=["GET"]),  # CB-19
+    Route("/feedback",                       submit_feedback,            methods=["POST"]),  # CB-12
+    Route("/progress",                       get_progress,               methods=["GET"]),   # CB-18
+    Route("/progress/{topic}",               get_topic_progress_endpoint, methods=["GET"]),  # CB-18
 ]

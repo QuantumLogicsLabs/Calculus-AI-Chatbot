@@ -110,6 +110,7 @@ function MessageFeedback({ className = "" }) {
         className={`cb-feedback-btn${feedback === "like" ? " cb-feedback-btn--active-like" : ""}`}
         onClick={() => setFeedback((f) => (f === "like" ? null : "like"))}
         aria-label="Like this response"
+        aria-pressed={feedback === "like"}
         title="Helpful"
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -121,6 +122,7 @@ function MessageFeedback({ className = "" }) {
         className={`cb-feedback-btn${feedback === "dislike" ? " cb-feedback-btn--active-dislike" : ""}`}
         onClick={() => setFeedback((f) => (f === "dislike" ? null : "dislike"))}
         aria-label="Dislike this response"
+        aria-pressed={feedback === "dislike"}
         title="Not helpful"
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -151,7 +153,7 @@ function Message({ message, showFeedback = true }) {
       <div className="cb-msg-block cb-msg-block--bot">
         <div className="cb-msg-row cb-msg-row--bot">
           <div className="cb-msg-avatar cb-msg-avatar--bot" aria-hidden="true">∂</div>
-          <div className="cb-msg-bubble cb-msg-bubble--error">
+          <div className="cb-msg-bubble cb-msg-bubble--error" role="alert">
             <span className="cb-error-icon" aria-hidden="true">⚠</span>
             <span className="cb-msg-text">{message.content}</span>
           </div>

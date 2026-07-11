@@ -1,5 +1,5 @@
 /**
- * chatApi.js — Objectives CB-1, CB-4
+ * chatApi.js — Objectives CB-1, CB-4, CB-18, CB-19
  *
  * Integrated (default):  POST {API_URL}/api/chat
  *                        GET  {API_URL}/api/chat/history
@@ -37,8 +37,9 @@ async function fetchWithTimeout(url, options = {}) {
  * @param {string} context
  * @param {string|null} token
  * @param {string} pageUrl
+ * @param {string} topicKey - CB-18: short stable topic label (e.g. "Partial Derivatives Part 2")
  */
-export async function sendMessage(messages, context, token = null, pageUrl = "/") {
+export async function sendMessage(messages, context, token = null, pageUrl = "/", topicKey = "") {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -47,7 +48,7 @@ export async function sendMessage(messages, context, token = null, pageUrl = "/"
     response = await fetchWithTimeout(getChatEndpoint(), {
       method: "POST",
       headers,
-      body: JSON.stringify({ messages, context, page_url: pageUrl }),
+      body: JSON.stringify({ messages, context, topic_key: topicKey, page_url: pageUrl }),
     });
   } catch (err) {
     if (err.message.includes("taking too long")) throw err;
@@ -68,6 +69,7 @@ export async function sendMessage(messages, context, token = null, pageUrl = "/"
     return {
       reply: data.reply || data.response || "",
       suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+      difficulty: data.difficulty || null, // CB-18
     };
   } catch {
     throw new Error("Invalid response from chat service.");
@@ -206,4 +208,75 @@ export async function fetchChatHistory(token) {
   } catch {
     return [];
   }
+}
+
+/**
+ * fetchTopicProgress — CB-18
+ * Fetches the student's currently-tracked difficulty level for a topic.
+ * Returns null for guests or on any failure (caller should treat that as
+ * "no badge to show" rather than an error).
+ */
+export async function fetchTopicProgress(token, topic) {
+  if (!token || !topic) return null;
+  try {
+    const response = await fetchWithTimeout(
+      `${API_URL}/api/chat/progress/${encodeURIComponent(topic)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * fetchAllProgress — CB-18
+ * Fetches every topic the student has a tracked difficulty level for.
+ * Useful for a Dashboard-style overview of adaptive progress.
+ */
+export async function fetchAllProgress(token) {
+  if (!token) return [];
+  try {
+    const response = await fetchWithTimeout(`${API_URL}/api/chat/progress`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.data || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * exportSession — CB-19
+ * Downloads the Markdown study sheet for a session. Throws a friendly
+ * Error on failure so the caller can surface it in-chat.
+ */
+export async function exportSession(token, sessionId) {
+  if (!token) throw new Error("Sign in to export a session as a study sheet.");
+  if (!sessionId) throw new Error("Start chatting first — there's no session to export yet.");
+
+  let response;
+  try {
+    response = await fetchWithTimeout(`${API_URL}/api/chat/sessions/${sessionId}/export`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (err) {
+    throw new Error("Could not reach the backend server.");
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) throw new Error("Session not found.");
+    throw new Error("Failed to export session.");
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : "study-sheet.md";
+
+  return { blob, filename };
 }

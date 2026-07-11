@@ -20,6 +20,7 @@ app = FastAPI(
 class ChatRequest(BaseModel):
     message: str
     topic: str = ""
+    difficulty: str = "intermediate"  # CB-18: beginner | intermediate | advanced
     history: list = Field(default_factory=list)
 
 class ChatResponse(BaseModel):
@@ -74,13 +75,14 @@ async def chat(request: ChatRequest):
 
     try:
         logging.info(
-            f"Received question: {request.message}"
+            f"Received question: {request.message} (difficulty={request.difficulty})"
         )
 
         raw_response = await ask_llm(
             message=request.message,
             topic=request.topic,
-            history=request.history
+            history=request.history,
+            difficulty=request.difficulty
         )
 
         clean_answer, suggestions = parse_follow_ups(raw_response)
@@ -107,6 +109,7 @@ async def chat(request: ChatRequest):
 class ChatStreamRequest(BaseModel):
     message: str
     topic: str = ""
+    difficulty: str = "intermediate"  # CB-18
     history: list = Field(default_factory=list)
 
 
@@ -128,13 +131,14 @@ async def chat_stream(request: ChatStreamRequest):
         full_response = ""
         try:
             logging.info(
-                f"Received streaming question: {request.message}"
+                f"Received streaming question: {request.message} (difficulty={request.difficulty})"
             )
 
             async for token in ask_llm_stream(
                 message=request.message,
                 topic=request.topic,
-                history=request.history
+                history=request.history,
+                difficulty=request.difficulty
             ):
                 full_response += token
                 payload = json.dumps({"token": token})

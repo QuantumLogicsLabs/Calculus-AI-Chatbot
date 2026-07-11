@@ -64,19 +64,20 @@ export const SYMBOL_GROUPS = [
 function MathSymbolPicker({ activeGroup, onGroupChange, onInsert }) {
   return (
     <div className="cb-symbols-palette">
-      <div className="cb-sym-groups">
+      <div className="cb-sym-groups" role="group" aria-label="Symbol categories">
         {SYMBOL_GROUPS.map((g, i) => (
           <button
             key={g.label}
             type="button"
             className={`cb-sym-group-btn${activeGroup === i ? " active" : ""}`}
             onClick={() => onGroupChange(i)}
+            aria-pressed={activeGroup === i}
           >
             {g.label}
           </button>
         ))}
       </div>
-      <div className="cb-sym-grid">
+      <div className="cb-sym-grid" role="group" aria-label={`${SYMBOL_GROUPS[activeGroup].label} symbols`}>
         {SYMBOL_GROUPS[activeGroup].symbols.map((s) => (
           <button
             key={s.label + s.insert}
