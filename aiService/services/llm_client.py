@@ -21,11 +21,12 @@ USE_MOCK = True
 # requires touching .env to work out of the box.
 # ─────────────────────────────────────────────────────────────
 
-# Secondary provider (real OpenAI), used only when xAI/Grok fails or
-# the circuit breaker is open. If OPENAI_API_KEY isn't set, fallback
-# calls will raise a clear error instead of silently no-op'ing.
-FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gpt-4o-mini")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# No real secondary provider is configured (no OpenAI key permitted for
+# this project). On primary failure or an open circuit, we degrade to
+# the existing mock response generator (ask_mock/ask_mock_stream) instead
+# of a second paid API — still satisfies "always return an answer," just
+# without a second real LLM behind it.
+FALLBACK_MODE = "mock_degrade"
 
 # How long the primary call is allowed to hang before we treat it as
 # a failure and hand off to fallback.
@@ -265,9 +266,8 @@ client = AsyncOpenAI(
     base_url="https://api.x.ai/v1"
 )
 
-# CB-20: secondary provider client (real OpenAI). None if no key is
-# configured yet — callers check for this before attempting fallback.
-fallback_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# Note: no secondary provider client. Fallback below calls ask_mock /
+# ask_mock_stream directly instead of a second real API.
 
 
 # ─────────────────────────────────────────────────────────────
@@ -408,9 +408,10 @@ async def ask_openai(
     difficulty: str = "intermediate"
 ):
     """
-    Send request to the primary provider (xAI/Grok), falling back to the
-    secondary provider (CB-20) on timeout, error, or when the circuit
-    breaker is open due to recent repeated failures.
+    Send request to the primary provider (xAI/Grok), degrading to the
+    mock response generator (CB-20) on timeout, error, or when the
+    circuit breaker is open due to recent repeated failures. No second
+    paid provider is used.
     """
 
     if history is None:
@@ -439,29 +440,14 @@ async def ask_openai(
             _primary_circuit.record_failure()
             logging.warning(f"PRIMARY_PROVIDER_FAILURE: {type(e).__name__}: {str(e)}")
     else:
-        logging.info("CIRCUIT_BREAKER: open, skipping primary call and going straight to fallback")
+        logging.info("CIRCUIT_BREAKER: open, skipping primary call and degrading to mock")
 
-    # ── Fallback (CB-20) ──────────────────────────────────────────────
+    # ── Fallback (CB-20): degrade to mock, no second paid provider ────
     if response_content is None:
-        served_by = "fallback"
-        if fallback_client is None:
-            raise RuntimeError(
-                "Primary provider failed and no fallback provider is configured "
-                "(set OPENAI_API_KEY to enable fallback)"
-            )
-        try:
-            fallback_response = await fallback_client.chat.completions.create(
-                model=FALLBACK_MODEL,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=1000
-            )
-            response_content = fallback_response.choices[0].message.content
-        except Exception as e:
-            logging.error(f"FALLBACK_PROVIDER_FAILURE: {type(e).__name__}: {str(e)}")
-            raise
+        served_by = "fallback_mock"
+        response_content = await ask_mock(message, topic, history, difficulty)
 
-    logging.info(f"LLM_RESPONSE_SOURCE: served_by={served_by} model={'grok-3-mini' if served_by == 'primary' else FALLBACK_MODEL}")
+    logging.info(f"LLM_RESPONSE_SOURCE: served_by={served_by} model={'grok-3-mini' if served_by == 'primary' else 'mock'}")
 
     # CB-8: Scope violation detection
     calculus_keywords = [
@@ -561,29 +547,13 @@ async def ask_openai_stream(
                 # attempt to resume via a different provider mid-answer.
                 return
     else:
-        logging.info("CIRCUIT_BREAKER: open, skipping primary stream and going straight to fallback")
+        logging.info("CIRCUIT_BREAKER: open, skipping primary stream and degrading to mock")
 
-    # ── Fallback (CB-20) — only reached if primary failed before any tokens ──
-    if fallback_client is None:
-        raise RuntimeError(
-            "Primary provider failed and no fallback provider is configured "
-            "(set OPENAI_API_KEY to enable fallback)"
-        )
-
-    logging.info(f"LLM_RESPONSE_SOURCE: served_by=fallback model={FALLBACK_MODEL} (stream)")
-    fallback_stream = await fallback_client.chat.completions.create(
-        model=FALLBACK_MODEL,
-        messages=messages,
-        temperature=0.3,
-        max_tokens=1000,
-        stream=True,
-    )
-    async for chunk in fallback_stream:
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+    # ── Fallback (CB-20): degrade to mock stream, no second paid provider ──
+    # Only reached if the primary failed before any tokens were sent.
+    logging.info("LLM_RESPONSE_SOURCE: served_by=fallback_mock (stream)")
+    async for chunk in ask_mock_stream(message, topic, history, difficulty):
+        yield chunk
 
 
 async def ask_llm_stream(
