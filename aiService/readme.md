@@ -20,6 +20,7 @@ POST /chat
   "history": []
 }
 
+
 ## Example Response
 
 {

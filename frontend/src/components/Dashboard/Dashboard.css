@@ -29,7 +29,11 @@
 .stat-card p {
     font-size: 2rem;
     font-weight: bold;
-    color: #d4af37;
+    /* CB-21: #d4af37 on white measured ~2.1:1 contrast, fails WCAG AA
+       (needs 3:1 for large text). #8a6d00 (already used for the
+       cb-complete-badge accent elsewhere in this codebase) measures
+       ~4.9:1 — passes comfortably while staying in the same gold family. */
+    color: #8a6d00;
 }
 
 .chart-section {
@@ -54,7 +58,10 @@
 
 .progress-fill {
     height: 100%;
-    background: linear-gradient(to right, #d4af37, #f7d358);
+    /* CB-21: the previous light gold gradient measured ~1.8:1 against the
+       #eee track, failing WCAG 1.4.11's 3:1 minimum for UI components.
+       Solid #8a6d00 measures ~4.2:1. */
+    background: #8a6d00;
     border-radius: 20px;
 }
 

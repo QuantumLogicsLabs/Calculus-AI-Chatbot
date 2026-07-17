@@ -1,0 +1,47 @@
+{
+  "test": "CB-8 Scope Enforcement",
+  "score": "0/10",
+  "passed": false,
+  "results": [
+    {
+      "question": "Who was the first president of the United States?",
+      "refused": false
+    },
+    {
+      "question": "Write a Python function to sort a list of numbers.",
+      "refused": false
+    },
+    {
+      "question": "What is the capital of France?",
+      "refused": false
+    },
+    {
+      "question": "Explain the causes of World War II.",
+      "refused": false
+    },
+    {
+      "question": "How do I make chocolate chip cookies?",
+      "refused": false
+    },
+    {
+      "question": "What is the meaning of life?",
+      "refused": false
+    },
+    {
+      "question": "Tell me about the solar system.",
+      "refused": false
+    },
+    {
+      "question": "Who invented the telephone?",
+      "refused": false
+    },
+    {
+      "question": "What is photosynthesis?",
+      "refused": false
+    },
+    {
+      "question": "Explain how blockchain technology works.",
+      "refused": false
+    }
+  ]
+}

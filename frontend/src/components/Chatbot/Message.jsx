@@ -100,17 +100,42 @@ function BotMessageContent({ content }) {
   );
 }
 
-function MessageFeedback({ className = "" }) {
+function MessageFeedback({ className = "", messageId = null, sessionId = null, userToken = null }) {
   const [feedback, setFeedback] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleFeedback = async (newFeedback) => {
+    // Toggle the local UI state
+    setFeedback((f) => (f === newFeedback ? null : newFeedback));
+
+    // For authenticated users, submit to backend (guests get local-only feedback)
+    if (userToken && messageId && sessionId && newFeedback !== feedback) {
+      setIsSubmitting(true);
+      try {
+        const { submitFeedback } = await import("../../services/chatApi");
+        await submitFeedback(messageId, sessionId, newFeedback === feedback ? null : newFeedback, userToken);
+      } catch (err) {
+        console.warn("Could not save feedback:", err.message);
+        // UI still reflects the toggle; submission failure is non-blocking
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const likeTitle = userToken ? "Mark as helpful (saved)" : "Mark as helpful (logged out — local only)";
+  const dislikeTitle = userToken ? "Mark as not helpful (saved)" : "Mark as not helpful (logged out — local only)";
 
   return (
     <div className={`cb-msg-feedback${className ? ` ${className}` : ""}`}>
       <button
         type="button"
         className={`cb-feedback-btn${feedback === "like" ? " cb-feedback-btn--active-like" : ""}`}
-        onClick={() => setFeedback((f) => (f === "like" ? null : "like"))}
+        onClick={() => handleFeedback("like")}
+        disabled={isSubmitting}
         aria-label="Like this response"
-        title="Helpful"
+        aria-pressed={feedback === "like"}
+        title={likeTitle}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" />
@@ -119,9 +144,11 @@ function MessageFeedback({ className = "" }) {
       <button
         type="button"
         className={`cb-feedback-btn${feedback === "dislike" ? " cb-feedback-btn--active-dislike" : ""}`}
-        onClick={() => setFeedback((f) => (f === "dislike" ? null : "dislike"))}
+        onClick={() => handleFeedback("dislike")}
+        disabled={isSubmitting}
         aria-label="Dislike this response"
-        title="Not helpful"
+        aria-pressed={feedback === "dislike"}
+        title={dislikeTitle}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" />
@@ -131,7 +158,7 @@ function MessageFeedback({ className = "" }) {
   );
 }
 
-function Message({ message, showFeedback = true }) {
+function Message({ message, showFeedback = true, messageId = null, sessionId = null, userToken = null }) {
   const isUser = message.role === "user";
   const isError = message.role === "error";
   const isBot = !isUser && !isError;
@@ -151,7 +178,7 @@ function Message({ message, showFeedback = true }) {
       <div className="cb-msg-block cb-msg-block--bot">
         <div className="cb-msg-row cb-msg-row--bot">
           <div className="cb-msg-avatar cb-msg-avatar--bot" aria-hidden="true">∂</div>
-          <div className="cb-msg-bubble cb-msg-bubble--error">
+          <div className="cb-msg-bubble cb-msg-bubble--error" role="alert">
             <span className="cb-error-icon" aria-hidden="true">⚠</span>
             <span className="cb-msg-text">{message.content}</span>
           </div>
@@ -213,7 +240,7 @@ function Message({ message, showFeedback = true }) {
           </div>
         )}
       </div>
-      {isBot && showFeedback && <MessageFeedback />}
+      {isBot && showFeedback && <MessageFeedback messageId={messageId} sessionId={sessionId} userToken={userToken} />}
     </div>
   );
 }

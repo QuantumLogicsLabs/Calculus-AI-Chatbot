@@ -103,7 +103,8 @@
     }
   }
   .cb-window button:focus-visible,
-  .cb-window textarea:focus-visible {
+  .cb-window textarea:focus-visible,
+  .cb-window [role="button"]:focus-visible {
     outline: 2px solid var(--gold);
     outline-offset: 2px;
   }
@@ -608,7 +609,7 @@
 .cb-msg-bubble .cb-msg-time {
   display: block;
   font-size: 0.65rem;
-  opacity: 0.55;
+  opacity: 0.75;
   margin-top: 0.35rem;
   text-align: right;
 }
@@ -640,7 +641,7 @@
   .cb-msg-time {
     display: block;
     font-size: 0.65rem;
-    opacity: 0.55;
+    opacity: 0.75;
     margin-top: 0.25rem;
     text-align: right;
   }
@@ -1098,7 +1099,7 @@
   .cb-input-hint {
     font-size: 0.65rem;
     color: var(--muted);
-    opacity: 0.65;
+    opacity: 0.8;
     margin-top: 0.35rem;
     padding-left: 42px;
   }
@@ -1367,7 +1368,9 @@
 
 .cb-progress-fill {
   height: 100%;
-  background: #d4af37; /* gold */
+  /* CB-21: #d4af37 measured ~1.7:1 against the #e5e5e5 track, failing
+     WCAG 1.4.11's 3:1 minimum for UI components. #8a6d00 measures ~3.9:1. */
+  background: #8a6d00;
   transition: width 0.6s ease;
 }
 
@@ -1381,5 +1384,3 @@
   font-size: 0.85rem;
   font-weight: 600;
 }
-
-  

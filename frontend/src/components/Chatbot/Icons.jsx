@@ -31,3 +31,10 @@ export const IconSend = (p) => (
     <path d="m5 12 7-7 7 7" /><path d="M12 19V5" />
   </svg>
 );
+
+// CB-19: export/download icon for the "Export study sheet" button
+export const IconDownload = (p) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...stroke} {...p}>
+    <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+  </svg>
+);

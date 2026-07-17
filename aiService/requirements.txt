@@ -3,3 +3,6 @@ uvicorn
 pydantic
 python-dotenv
 openai
+sympy
+pytest
+pytest-asyncio

@@ -1,0 +1,716 @@
+{
+  "test_suite": "CalcVoyager System Prompt Acceptance Test",
+  "total_questions": 20,
+  "passed": 0,
+  "failed": 20,
+  "pass_rate": "0.0%",
+  "checks_summary": {
+    "latex_formatting": 0,
+    "follow_ups": 0,
+    "word_count": 20,
+    "step_formatting": 20
+  },
+  "correctness_met": false,
+  "results": [
+    {
+      "question_id": 1,
+      "topic": "limits",
+      "question": "What is the limit of (x² - 4)/(x - 2) as x approaches 2?",
+      "response_preview": "\nMock AI Response\n\nTopic: limits\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nWhat is the limit of (x² - 4)/(x - 2) as x approaches 2?\n\nHistory Length:\n0 messages\n\nThis is...",
+      "word_count": 43,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "43 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "1/2 fragments found (score: 0.50) - Missing: x + 2"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.5
+    },
+    {
+      "question_id": 2,
+      "topic": "limits",
+      "question": "Explain what it means for a limit to exist at a point.",
+      "response_preview": "\nMock AI Response\n\nTopic: limits\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nExplain what it means for a limit to exist at a point.\n\nHistory Length:\n0 messages\n\nThis is a...",
+      "word_count": 41,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "41 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "1/2 fragments found (score: 0.50) - Missing: \\lim"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.5
+    },
+    {
+      "question_id": 3,
+      "topic": "continuity",
+      "question": "Is the function f(x,y) = xy/(x² + y²) continuous at the origin?",
+      "response_preview": "\nMock AI Response\n\nTopic: continuity\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nIs the function f(x,y) = xy/(x² + y²) continuous at the origin?\n\nHistory Length:\n0 messag...",
+      "word_count": 41,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "41 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/2 fragments found (score: 0.00) - Missing: path, discontinuous"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 4,
+      "topic": "continuity",
+      "question": "What are the three conditions for a function to be continuous at a point?",
+      "response_preview": "\nMock AI Response\n\nTopic: continuity\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nWhat are the three conditions for a function to be continuous at a point?\n\nHistory Length...",
+      "word_count": 43,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "43 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: f(a), \\lim, defined"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 5,
+      "topic": "partial_derivatives",
+      "question": "Find the partial derivative ∂f/∂x for f(x,y) = x³y² + 2xy.",
+      "response_preview": "\nMock AI Response\n\nTopic: partial_derivatives\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nFind the partial derivative ∂f/∂x for f(x,y) = x³y² + 2xy.\n\nHistory Length:\n0 me...",
+      "word_count": 40,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "40 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: 3x^2y^2, 2y, \\frac{\\partial f}{\\partial x}"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 6,
+      "topic": "partial_derivatives",
+      "question": "What does the partial derivative ∂f/∂y represent geometrically?",
+      "response_preview": "\nMock AI Response\n\nTopic: partial_derivatives\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nWhat does the partial derivative ∂f/∂y represent geometrically?\n\nHistory Length:...",
+      "word_count": 37,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "37 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: \\frac{\\partial f}{\\partial y}, slope, constant"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 7,
+      "topic": "partial_derivatives",
+      "question": "Calculate all second-order partial derivatives for f(x,y) = e^(xy).",
+      "response_preview": "\nMock AI Response\n\nTopic: partial_derivatives\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nCalculate all second-order partial derivatives for f(x,y) = e^(xy).\n\nHistory Len...",
+      "word_count": 38,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "38 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/2 fragments found (score: 0.00) - Missing: e^{xy}, \\frac{\\partial^2 f}{\\partial x^2}"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 8,
+      "topic": "gradients",
+      "question": "Find the gradient of f(x,y,z) = x²y + yz² at the point (1,2,1).",
+      "response_preview": "\nMock AI Response\n\nTopic: gradients\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nFind the gradient of f(x,y,z) = x²y + yz² at the point (1,2,1).\n\nHistory Length:\n0 message...",
+      "word_count": 42,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "42 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "1/4 fragments found (score: 0.25) - Missing: \\nabla f, 4, \\langle"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.25
+    },
+    {
+      "question_id": 9,
+      "topic": "gradients",
+      "question": "Explain the geometric meaning of the gradient vector.",
+      "response_preview": "\nMock AI Response\n\nTopic: gradients\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nExplain the geometric meaning of the gradient vector.\n\nHistory Length:\n0 messages\n\nThis is...",
+      "word_count": 37,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "37 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: perpendicular, \\nabla f, steepest"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 10,
+      "topic": "directional_derivatives",
+      "question": "How do you find the directional derivative of f in the direction of vector v?",
+      "response_preview": "\nMock AI Response\n\nTopic: directional_derivatives\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nHow do you find the directional derivative of f in the direction of vector v...",
+      "word_count": 44,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "44 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: D_\\mathbf{u}, \\nabla f, \\cdot"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 11,
+      "topic": "chain_rule",
+      "question": "Use the chain rule to find dz/dt where z = x²y, x = cos(t), y = sin(t).",
+      "response_preview": "\nMock AI Response\n\nTopic: chain_rule\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nUse the chain rule to find dz/dt where z = x²y, x = cos(t), y = sin(t).\n\nHistory Length:\n...",
+      "word_count": 46,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "46 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: \\frac{dz}{dt}, \\cos, \\sin"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 12,
+      "topic": "chain_rule",
+      "question": "Explain the multivariable chain rule for z = f(x,y) where x = g(t) and y = h(t).",
+      "response_preview": "\nMock AI Response\n\nTopic: chain_rule\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nExplain the multivariable chain rule for z = f(x,y) where x = g(t) and y = h(t).\n\nHistory...",
+      "word_count": 46,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "46 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: \\frac{dz}{dt}, \\frac{\\partial f}{\\partial x}, \\frac{dx}{dt}"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 13,
+      "topic": "multiple_integrals",
+      "question": "Evaluate the double integral ∫∫ xy dA over the rectangle [0,2] × [0,3].",
+      "response_preview": "\nMock AI Response\n\nTopic: multiple_integrals\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nEvaluate the double integral ∫∫ xy dA over the rectangle [0,2] × [0,3].\n\nHistory ...",
+      "word_count": 42,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "42 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: 9, \\int_0^2, \\int_0^3"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 14,
+      "topic": "multiple_integrals",
+      "question": "What is the geometric interpretation of a double integral?",
+      "response_preview": "\nMock AI Response\n\nTopic: multiple_integrals\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nWhat is the geometric interpretation of a double integral?\n\nHistory Length:\n0 mes...",
+      "word_count": 38,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "38 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/2 fragments found (score: 0.00) - Missing: volume, \\iint"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 15,
+      "topic": "vector_calculus",
+      "question": "Calculate the divergence of the vector field F = ⟨x², y², z²⟩.",
+      "response_preview": "\nMock AI Response\n\nTopic: vector_calculus\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nCalculate the divergence of the vector field F = ⟨x², y², z²⟩.\n\nHistory Length:\n0 me...",
+      "word_count": 41,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "41 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/4 fragments found (score: 0.00) - Missing: \\nabla \\cdot, 2x, 2y and 1 more"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 16,
+      "topic": "vector_calculus",
+      "question": "Find the curl of F = ⟨y, -x, z⟩ and explain what it represents.",
+      "response_preview": "\nMock AI Response\n\nTopic: vector_calculus\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nFind the curl of F = ⟨y, -x, z⟩ and explain what it represents.\n\nHistory Length:\n0 m...",
+      "word_count": 43,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "43 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "1/3 fragments found (score: 0.33) - Missing: \\nabla \\times, rotation"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.3333333333333333
+    },
+    {
+      "question_id": 17,
+      "topic": "lagrange_multipliers",
+      "question": "Use Lagrange multipliers to find the maximum of f(x,y) = xy subject to x² + y² = 1.",
+      "response_preview": "\nMock AI Response\n\nTopic: lagrange_multipliers\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nUse Lagrange multipliers to find the maximum of f(x,y) = xy subject to x² + y² ...",
+      "word_count": 47,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "47 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/4 fragments found (score: 0.00) - Missing: \\lambda, \\frac{1}{2}, \\nabla f and 1 more"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 18,
+      "topic": "lagrange_multipliers",
+      "question": "Explain when and why we use Lagrange multipliers for optimization.",
+      "response_preview": "\nMock AI Response\n\nTopic: lagrange_multipliers\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nExplain when and why we use Lagrange multipliers for optimization.\n\nHistory Len...",
+      "word_count": 39,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "39 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: \\lambda, constraint, \\nabla f"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 19,
+      "topic": "taylor_series",
+      "question": "Find the second-order Taylor polynomial for f(x,y) = e^(x+y) at (0,0).",
+      "response_preview": "\nMock AI Response\n\nTopic: taylor_series\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nFind the second-order Taylor polynomial for f(x,y) = e^(x+y) at (0,0).\n\nHistory Length...",
+      "word_count": 40,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "40 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: 1 + x + y, \\frac{1}{2}, x^2"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    },
+    {
+      "question_id": 20,
+      "topic": "taylor_series",
+      "question": "What is the purpose of linearization in multivariable calculus?",
+      "response_preview": "\nMock AI Response\n\nTopic: taylor_series\nDifficulty (CB-18): intermediate\nSession Summary (CB-13): None\n\nQuestion:\nWhat is the purpose of linearization in multivariable calculus?\n\nHistory Length:\n0 mes...",
+      "word_count": 38,
+      "passed": false,
+      "checks": {
+        "latex_formatting": [
+          false,
+          "No LaTeX math expressions found"
+        ],
+        "follow_ups": [
+          false,
+          "No [FOLLOW_UPS] block found"
+        ],
+        "word_count": [
+          true,
+          "38 words (acceptable)"
+        ],
+        "step_formatting": [
+          true,
+          "No numbered steps (may be conceptual explanation)"
+        ],
+        "answer_key": [
+          false,
+          "0/3 fragments found (score: 0.00) - Missing: linear approximation, \\nabla f, tangent plane"
+        ]
+      },
+      "errors": [
+        "latex_formatting: No LaTeX math expressions found",
+        "follow_ups: No [FOLLOW_UPS] block found"
+      ],
+      "correctness_score": 0.0
+    }
+  ]
+}

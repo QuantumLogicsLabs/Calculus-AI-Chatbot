@@ -2,3 +2,5 @@ starlette
 uvicorn
 httpx
 python-multipart
+aiosqlite
+aiosqlite>=0.20.0
