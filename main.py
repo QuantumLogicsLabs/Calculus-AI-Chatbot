@@ -1,6 +1,7 @@
 import sys
 import os
 
+# Add the project root to Python path so we can import 'services'
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from services.math_verifier import verify_cal_math, extract_boxed_answer
@@ -19,16 +20,16 @@ def run_verification(question: str, cal_response: str):
     # Extract Cal's boxed answer for display
     cal_boxed = extract_boxed_answer(cal_response)
     
-    print(f"Cal's Answer: {cal_boxed}")
-    print(f"SymPy's Answer: {sympy_answer}")
+    print(f"🤖 Cal's Answer: {cal_boxed}")
+    print(f"✅ SymPy's Answer: {sympy_answer}")
     
     if error:
-        print(f"Error: {error}")
+        print(f"⚠️  Error: {error}")
     else:
         if is_correct:
-            print("VERDICT: CORRECT! Cal got it right.")
+            print("🎉 VERDICT: CORRECT! Cal got it right.")
         else:
-            print("VERDICT: WRONG! Cal made a mistake.")
+            print("❌ VERDICT: WRONG! Cal made a mistake.")
     print("="*50)
 
 def main():
@@ -64,7 +65,7 @@ def main():
     
     # --- OPTIONAL: Interactive mode (uncomment to use) ---
     # while True:
-    #     print("\n Enter a question (or type 'exit' to quit):")
+    #     print("\n🔍 Enter a question (or type 'exit' to quit):")
     #     q = input("Question: ")
     #     if q.lower() == 'exit':
     #         break
