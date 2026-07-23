@@ -27,7 +27,7 @@ function Dashboard() {
       </div>
         
       <div className="chart-section">
-        <h2>Most Asked Topics</h2>
+        <h2>Frequently Asked Topics</h2>
 
         <div className="topic-row">
           <span>Limits</span>
