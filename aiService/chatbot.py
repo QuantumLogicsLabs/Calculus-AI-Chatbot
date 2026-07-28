@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware # ✅ SECURITY ARCHITECT UPDATE
 from pydantic import BaseModel, Field
 import logging
 import re
@@ -8,13 +9,30 @@ import json
 from aiService.services.llm_client import ask_llm, ask_llm_stream, summarize_history
 
 # Configure logging
-#logging
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(
     title="CalcVoyager Chat Service",
     description="Backend API service for the CalcVoyager AI chatbot",
     version="1.0.0"
+)
+
+# ✅ SECURITY ARCHITECT UPDATE: Option B Direct Connection Settings
+# Configured to allow direct access from your development setups and final production domain
+ALLOWED_AI_ORIGINS = [
+    "https://your-calculus-website.com",  # Production frontend domain
+    "http://localhost:3000",              # Local React development mapping
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",              # Local Vite development mapping
+    "http://127.0.0.1:5173"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_AI_ORIGINS,           # ✅ Restricts origin access to specified domains
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],   # ✅ Restricts methods to essential service operations
+    allow_headers=["*"],                        # ✅ Allows frontend client request headers
 )
 
 class ChatRequest(BaseModel):
@@ -175,6 +193,7 @@ async def chat_stream(request: ChatStreamRequest):
             "X-Accel-Buffering": "no",  # disables proxy buffering (e.g. nginx)
         }
     )
+
 class SummarizeRequest(BaseModel):
     messages: list = Field(default_factory=list)
     previous_summary: str = ""

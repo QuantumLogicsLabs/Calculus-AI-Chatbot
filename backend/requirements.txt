@@ -1,6 +1,8 @@
-starlette
-uvicorn
-httpx
-python-multipart
-aiosqlite
-aiosqlite>=0.20.0
+starlette==0.46.2
+uvicorn==0.23.2
+httpx==0.28.1
+python-multipart==0.0.32
+aiosqlite==0.22.1
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.12
+alembic==1.13.0
