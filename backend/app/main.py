@@ -11,12 +11,16 @@ from starlette.responses import JSONResponse
 from backend.app.routes import chat
 
 # ✅ SECURITY ARCHITECT UPDATE: Define allowed domains explicitly.
-# TODO: replace with real production domain
+# B-1 FIX: the placeholder "https://your-calculus-website.com" was never
+# swapped for the real production domain, so the browser's CORS preflight
+# (OPTIONS) never found a matching Origin and blocked every chat request
+# before it reached the server (net::ERR_FAILED on /api/chat and
+# /api/chat/stream, on every message).
 ALLOWED_ORIGINS = [
-    "https://your-calculus-website.com",  # Production domain
-    "http://localhost:3000",              # Local React development mapping
+    "https://calculus.quantumlogicslimited.com",  # Production domain (B-1 fix: was a placeholder)
+    "http://localhost:3000",                      # Local React development mapping
     "http://127.0.0.1:3000",
-    "http://localhost:5173",              # Local Vite development mapping
+    "http://localhost:5173",                      # Local Vite development mapping
     "http://127.0.0.1:5173"
 ]
 
