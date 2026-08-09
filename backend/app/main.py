@@ -13,12 +13,22 @@ from backend.app.routes import chat
 # ✅ SECURITY ARCHITECT UPDATE: Define allowed domains explicitly.
 # TODO: replace with real production domain
 ALLOWED_ORIGINS = [
-    "https://your-calculus-website.com",  # Production domain
-    "http://localhost:3000",              # Local React development mapping
+    "https://calculus.quantumlogicslimited.com",  # Production domain
+    "https://www.calculus.quantumlogicslimited.com",  # WWW variant
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:5173",              # Local Vite development mapping
+    "http://localhost:5173",
     "http://127.0.0.1:5173"
 ]
+
+# Add support for extra origins via env var
+import os
+extra_origins = os.getenv("ALLOWED_ORIGINS_EXTRA", "")
+if extra_origins:
+    for origin in extra_origins.split(","):
+        origin = origin.strip()
+        if origin and origin not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(origin)
 
 
 async def homepage(request):
