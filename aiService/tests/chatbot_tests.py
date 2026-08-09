@@ -18,7 +18,7 @@ import json
 import re
 from pathlib import Path
 
-from aiService.services.llm_client import ask_llm
+from aiService.services.llm_client import ask_llm, _cache_key, _response_cache  # OB-3: added _cache_key, _response_cache
 from aiService.services.math_verifier import verify_cal_math  # CB-16
 
 QUESTIONS_FILE = Path(__file__).parent / "calculus_questions.json"
@@ -341,6 +341,224 @@ async def test_question(question_data: dict) -> TestResult:
     return result
 
 
+# ============================================================================
+# OB-3: Follow-up cache correctness suite
+#
+# Bug: _cache_key() previously hashed only (message, topic, difficulty),
+# so two conversations asking the literal same follow-up text with
+# different prior context could collide and be served the wrong cached
+# answer. These tests validate the fix directly against _cache_key(),
+# and end-to-end against ask_llm() across representative multi-turn
+# scenarios.
+# ============================================================================
+
+FOLLOW_UP_TEXT = "Can you explain that more?"
+
+HISTORY_DERIVATIVES = [
+    {"role": "user", "content": "What is a partial derivative?"},
+    {"role": "assistant", "content": "A partial derivative measures how a multivariable function changes with respect to one variable, holding the others constant."},
+]
+
+HISTORY_LAGRANGE = [
+    {"role": "user", "content": "How do Lagrange multipliers work?"},
+    {"role": "assistant", "content": "Lagrange multipliers find extrema of a function subject to equality constraints by setting gradients proportional to each other."},
+]
+
+# Same NUMBER of turns as the two histories above, but different content —
+# this is the case that would previously slip through even a naive
+# "does history length matter" check, since the old key ignored content
+# entirely and length alone wasn't part of it either.
+HISTORY_INTEGRALS = [
+    {"role": "user", "content": "How do I set up a double integral over a region?"},
+    {"role": "assistant", "content": "You describe the region's bounds for each variable, then integrate the inner variable first, treating the outer variable as constant."},
+]
+
+
+def test_cache_key_differs_with_different_history():
+    """Unit test: same message/topic/difficulty, different history -> different keys."""
+    key_a = _cache_key(FOLLOW_UP_TEXT, "", "intermediate", HISTORY_DERIVATIVES)
+    key_b = _cache_key(FOLLOW_UP_TEXT, "", "intermediate", HISTORY_LAGRANGE)
+    key_c = _cache_key(FOLLOW_UP_TEXT, "", "intermediate", HISTORY_INTEGRALS)
+
+    passed = len({key_a, key_b, key_c}) == 3
+    detail = (
+        "All 3 history contexts produced distinct cache keys"
+        if passed else
+        "COLLISION: identical cache key generated for different conversation histories"
+    )
+    return passed, detail
+
+
+def test_cache_key_stable_for_identical_history():
+    """Regression check: identical inputs must still produce identical keys (cache hits preserved)."""
+    key_a = _cache_key(FOLLOW_UP_TEXT, "", "intermediate", HISTORY_DERIVATIVES)
+    key_b = _cache_key(FOLLOW_UP_TEXT, "", "intermediate", list(HISTORY_DERIVATIVES))  # fresh list, same content
+
+    passed = key_a == key_b
+    detail = (
+        "Identical message+history reproduces the same cache key (cache hits still work)"
+        if passed else
+        "Identical inputs produced different keys — cache hit rate would regress"
+    )
+    return passed, detail
+
+
+def test_cache_key_stable_beyond_history_window():
+    """History entries older than the 10-turn window should not affect the key (matches _build_messages)."""
+    long_history = HISTORY_DERIVATIVES + [
+        {"role": "user", "content": f"filler question {i}"} for i in range(20)
+    ]
+    long_history_extra_old_turn = [
+        {"role": "user", "content": "an ancient, irrelevant first message"}
+    ] + long_history
+
+    key_a = _cache_key(FOLLOW_UP_TEXT, "", "intermediate", long_history)
+    key_b = _cache_key(FOLLOW_UP_TEXT, "", "intermediate", long_history_extra_old_turn)
+
+    # Both get truncated to the same trailing 10 turns, so keys should match.
+    passed = key_a == key_b
+    detail = (
+        "Cache key correctly ignores history older than the trailing window"
+        if passed else
+        "Cache key changed based on history outside the trailing window (window mismatch with _build_messages)"
+    )
+    return passed, detail
+
+
+async def test_end_to_end_no_cache_collision_across_conversations():
+    """
+    End-to-end: simulate 3 different students asking the identical literal
+    follow-up question after 3 different conversations. Confirm the cache
+    stores 3 separate entries instead of one shared (incorrect) entry.
+    """
+    _response_cache.clear()
+
+    await ask_llm(message=FOLLOW_UP_TEXT, topic="", history=HISTORY_DERIVATIVES)
+    await ask_llm(message=FOLLOW_UP_TEXT, topic="", history=HISTORY_LAGRANGE)
+    await ask_llm(message=FOLLOW_UP_TEXT, topic="", history=HISTORY_INTEGRALS)
+
+    passed = len(_response_cache) == 3
+    detail = (
+        f"3 distinct cache entries stored for 3 distinct conversations ({len(_response_cache)} found)"
+        if passed else
+        f"Expected 3 distinct cache entries, found {len(_response_cache)} — follow-ups are colliding"
+    )
+    return passed, detail
+
+
+async def test_end_to_end_repeat_followup_still_hits_cache():
+    """
+    End-to-end: the SAME student asking the SAME follow-up in the SAME
+    conversation state a second time should still be a cache hit (the fix
+    must not break normal caching behavior).
+    """
+    _response_cache.clear()
+
+    first_response = await ask_llm(message=FOLLOW_UP_TEXT, topic="", history=HISTORY_DERIVATIVES)
+    size_after_first = len(_response_cache)
+
+    second_response = await ask_llm(message=FOLLOW_UP_TEXT, topic="", history=list(HISTORY_DERIVATIVES))
+    size_after_second = len(_response_cache)
+
+    passed = (
+        first_response == second_response
+        and size_after_first == 1
+        and size_after_second == 1
+    )
+    detail = (
+        "Repeat follow-up in the same context correctly hit the cache (no new entry created)"
+        if passed else
+        f"Cache hit behavior regressed (entries: {size_after_first} -> {size_after_second})"
+    )
+    return passed, detail
+
+
+async def test_end_to_end_history_growth_within_conversation():
+    """
+    End-to-end: within ONE growing conversation, the same follow-up asked
+    again after a new turn has been appended should be treated as new
+    context (not silently served the earlier cached answer).
+    """
+    _response_cache.clear()
+
+    conversation = list(HISTORY_DERIVATIVES)
+    await ask_llm(message=FOLLOW_UP_TEXT, topic="", history=conversation)
+
+    conversation = conversation + [
+        {"role": "user", "content": FOLLOW_UP_TEXT},
+        {"role": "assistant", "content": "Here's a deeper look at partial derivatives..."},
+        {"role": "user", "content": "What about second-order partials?"},
+        {"role": "assistant", "content": "Second-order partials differentiate a partial derivative again..."},
+    ]
+
+    await ask_llm(message=FOLLOW_UP_TEXT, topic="", history=conversation)
+
+    passed = len(_response_cache) == 2
+    detail = (
+        "Same follow-up later in a growing conversation correctly created a fresh cache entry"
+        if passed else
+        f"Expected 2 distinct cache entries as the conversation grew, found {len(_response_cache)}"
+    )
+    return passed, detail
+
+
+async def run_followup_cache_suite() -> bool:
+    print("=" * 60)
+    print("OB-3: Follow-Up Question Cache Correctness Suite")
+    print("Testing _cache_key() fix across multi-turn scenarios")
+    print("=" * 60)
+    print()
+
+    sync_tests = [
+        ("Cache key differs across different histories", test_cache_key_differs_with_different_history),
+        ("Cache key stable for identical history (cache hits preserved)", test_cache_key_stable_for_identical_history),
+        ("Cache key ignores history beyond trailing window", test_cache_key_stable_beyond_history_window),
+    ]
+
+    async_tests = [
+        ("No cache collision across different conversations", test_end_to_end_no_cache_collision_across_conversations),
+        ("Repeat follow-up in same context still hits cache", test_end_to_end_repeat_followup_still_hits_cache),
+        ("Same follow-up later in a growing conversation gets fresh entry", test_end_to_end_history_growth_within_conversation),
+    ]
+
+    results = []
+
+    for label, test_fn in sync_tests:
+        passed, detail = test_fn()
+        results.append(passed)
+        status = "PASS" if passed else "FAIL"
+        print(f"[{status}] {label}")
+        print(f"       {detail}")
+        print()
+
+    for label, test_fn in async_tests:
+        passed, detail = await test_fn()
+        results.append(passed)
+        status = "PASS" if passed else "FAIL"
+        print(f"[{status}] {label}")
+        print(f"       {detail}")
+        print()
+
+    score = sum(results)
+    total = len(results)
+
+    print("=" * 60)
+    print(f"OB-3 RESULTS: {score}/{total} tests passed")
+    print("=" * 60)
+    print()
+
+    all_passed = score == total
+    if all_passed:
+        print("PASS: OB-3 ACCEPTANCE MET")
+        print("  Follow-up questions no longer collide across conversation contexts")
+    else:
+        print("FAIL: OB-3 ACCEPTANCE NOT MET")
+        print(f"  {total - score} scenario(s) still show incorrect cache behavior")
+
+    print()
+    return all_passed
+
+
 async def run_test_suite():
     print("=" * 60)
     print("CB-2: CalcVoyager Acceptance Test")
@@ -475,12 +693,14 @@ if __name__ == "__main__":
     async def main():
         print()
         print("[CalcVoyager Test Suite Execution]")
-        print("CB-2, CB-8, CB-9, CB-16 Combined")
+        print("CB-2, CB-8, CB-9, CB-16, OB-3 Combined")
         print()
 
         cb2_passed, cb9_passed = await run_test_suite()
         print()
         cb8_passed = await run_scope_enforcement_suite()
+        print()
+        ob3_passed = await run_followup_cache_suite()  # OB-3: new suite
 
         print()
         print("=" * 60)
@@ -489,10 +709,11 @@ if __name__ == "__main__":
         print(f"CB-2 (System Prompt):      {'PASS' if cb2_passed else 'FAIL'}")
         print(f"CB-8 (Scope Enforcement):  {'PASS' if cb8_passed else 'FAIL'}")
         print(f"CB-9 (Quality Evaluation): {'PASS' if cb9_passed else 'FAIL'}")
+        print(f"OB-3 (Follow-Up Caching):  {'PASS' if ob3_passed else 'FAIL'}")  # OB-3: new line
         print("=" * 60)
         print()
 
-        all_passed = cb2_passed and cb8_passed and cb9_passed
+        all_passed = cb2_passed and cb8_passed and cb9_passed and ob3_passed  # OB-3: added to gate
         if all_passed:
             print("ALL ACCEPTANCE CRITERIA MET")
             import sys

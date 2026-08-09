@@ -340,9 +340,43 @@ _primary_circuit = CircuitBreaker(
 # ─────────────────────────────────────────────────────────────
 _response_cache: dict = {}
 
+# How many trailing history turns actually influence the model's
+# response (must mirror the window used in _build_messages below).
+# Keeping this in one place means the cache key and the prompt
+# builder can never silently drift out of sync again.
+_CACHE_HISTORY_WINDOW = 10
 
-def _cache_key(message: str, topic: str, difficulty: str) -> str:
-    raw = f"{(message or '').strip().lower()}|{(topic or '').strip().lower()}|{difficulty}"
+
+def _cache_key(message: str, topic: str, difficulty: str, history: list = None) -> str:
+    """
+    OB-3 fix: previously this key only hashed (message, topic, difficulty),
+    which meant two different conversations asking the same literal
+    follow-up ("can you explain more?", "yes", "why though?") would collide
+    on the exact same cache entry and get served an answer generated for a
+    completely different prior context.
+
+    Fix: fold a normalized representation of the trailing conversation
+    history into the key, using the SAME trailing window
+    (_CACHE_HISTORY_WINDOW) that _build_messages() actually sends to the
+    model. This guarantees the cache key always reflects exactly the
+    context the LLM would see, so:
+      - identical message + identical history  -> cache HIT (fast path preserved)
+      - identical message + different history   -> cache MISS (correct, no collision)
+    """
+    history = history or []
+    trimmed_history = history[-_CACHE_HISTORY_WINDOW:] if len(history) > _CACHE_HISTORY_WINDOW else history
+
+    history_fingerprint = "||".join(
+        f"{(item.get('role') or '').strip().lower()}:{(item.get('content') or '').strip().lower()}"
+        for item in trimmed_history
+    )
+
+    raw = (
+        f"{(message or '').strip().lower()}|"
+        f"{(topic or '').strip().lower()}|"
+        f"{difficulty}|"
+        f"{history_fingerprint}"
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -370,7 +404,7 @@ def _build_messages(message: str, topic: str, difficulty: str, history: list, su
             "content": f"Earlier in this session: {summary}"
         })
 
-    history = history[-10:] if history and len(history) > 10 else (history or [])
+    history = history[-_CACHE_HISTORY_WINDOW:] if history and len(history) > _CACHE_HISTORY_WINDOW else (history or [])
     for item in history:
         messages.append({"role": item["role"], "content": item["content"]})
     messages.append({"role": "user", "content": message})
@@ -548,7 +582,8 @@ async def ask_llm_stream(
     difficulty: str = "intermediate",
     summary: str = ""
 ):
-    cache_key = _cache_key(message, topic, difficulty)
+    # OB-3 fix: history is now part of the cache key (see _cache_key docstring).
+    cache_key = _cache_key(message, topic, difficulty, history)
     cached = _cache_get(cache_key)
     if cached is not None:
         logging.info("LLM_RESPONSE_SOURCE: served_by=cache (stream)")
@@ -578,7 +613,8 @@ async def ask_llm(
     difficulty: str = "intermediate",
     summary: str = ""
 ):
-    cache_key = _cache_key(message, topic, difficulty)
+    # OB-3 fix: history is now part of the cache key (see _cache_key docstring).
+    cache_key = _cache_key(message, topic, difficulty, history)
     cached = _cache_get(cache_key)
     if cached is not None:
         logging.info("LLM_RESPONSE_SOURCE: served_by=cache")
