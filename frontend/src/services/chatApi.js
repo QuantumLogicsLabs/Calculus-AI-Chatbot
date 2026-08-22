@@ -2,12 +2,18 @@
  * chatApi.js — Objectives CB-1, CB-4, CB-18, CB-19
  *
  * Integrated (default):  POST {API_URL}/api/chat
- *                        GET  {API_URL}/api/chat/history
+ *                        GET  {API_URL}/api/chat/sessions
  * Standalone (Beanie):   POST {REACT_APP_CHAT_URL}/chat
  */
 
-const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8002";
-const STANDALONE_CHAT_URL = process.env.REACT_APP_CHAT_URL || "";
+// B-2 fix: Vite only exposes env vars via import.meta.env, and only
+// picks up ones prefixed VITE_ — process.env.REACT_APP_API_URL is a
+// Create React App convention and is never populated by Vite, so this
+// was silently falling back to the localhost default in every build.
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8002";
+// Same root cause applies here — fixed for consistency so this doesn't
+// become the next B-2-shaped bug once someone actually sets this var.
+const STANDALONE_CHAT_URL = import.meta.env.VITE_CHAT_URL || "";
 const REQUEST_TIMEOUT_MS = 45000;
 
 function getChatEndpoint() {
@@ -367,5 +373,63 @@ export async function submitFeedback(messageId, sessionId, feedback, token) {
     // Log but don't crash — feedback is optional
     console.warn("Could not save feedback:", err.message);
     throw err;
+  }
+}
+
+
+/**
+ * createChatSession — CB-13
+ * Creates a new backend session for logged-in users. Guests skip this
+ * (handled by caller) since guest sessions aren't persisted.
+ */
+export async function createChatSession(token, title = "New Chat") {
+  if (!token) return null;
+  try {
+    const response = await fetchWithTimeout(`${API_URL}/api/chat/sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ title }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    // B-2 fix: the backend actually returns the session id nested under
+    // `data`, e.g. { data: { session_id: "..." } } — not at the top
+    // level. The old `data.session_id || data.id` check always missed
+    // it, so createChatSession() was silently returning null for every
+    // logged-in user.
+    return data.data?.session_id || null;
+  } catch {
+    return null; // fail silently — local reset still works
+  }
+}
+
+export async function fetchChatHistory(token) {
+  if (!token) return [];
+
+  let response;
+  try {
+    // B-2 fix: backend route is /api/chat/sessions, not /api/chat/history
+    // (the latter doesn't exist, so this always failed for logged-in users).
+    response = await fetchWithTimeout(`${API_URL}/api/chat/sessions`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (err) {
+    if (err.message.includes("taking too long")) throw err;
+    throw new Error("Could not reach the backend server.");
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) throw new Error("Session expired. Please log in again.");
+    throw new Error("Failed to load chat history.");
+  }
+
+  try {
+    const data = await response.json();
+    return data.history || data.sessions || data.data || [];
+  } catch {
+    return [];
   }
 }
