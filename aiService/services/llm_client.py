@@ -6,8 +6,16 @@ import logging
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-# Load .env file
-load_dotenv("aiService/services/.env")
+from dotenv import load_dotenv
+import os
+from pathlib import Path
+
+# Load .env from the SAME folder as this file (fixes Docker/CI issues)
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+# Now you can get your API keys securely
+GROK_API_KEY = os.getenv("GROK_API_KEY")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

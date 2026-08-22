@@ -11,15 +11,28 @@ from starlette.responses import JSONResponse
 from backend.app.routes import chat
 
 # ✅ SECURITY ARCHITECT UPDATE: Define allowed domains explicitly.
-# TODO: replace with real production domain
+# B-1 FIX: the placeholder "https://your-calculus-website.com" was never
+# swapped for the real production domain, so the browser's CORS preflight
+# (OPTIONS) never found a matching Origin and blocked every chat request
+# before it reached the server (net::ERR_FAILED on /api/chat and
+# /api/chat/stream, on every message).
 ALLOWED_ORIGINS = [
-    "https://calculus.quantumlogiclimited.com",
-    "https://calculus-runtime-frontend-ten.vercel.app",
+    "https://calculus.quantumlogicslimited.com",  # Production domain
+    "https://www.calculus.quantumlogicslimited.com",  # WWW variant
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5173"
 ]
+
+# Add support for extra origins via env var
+import os
+extra_origins = os.getenv("ALLOWED_ORIGINS_EXTRA", "")
+if extra_origins:
+    for origin in extra_origins.split(","):
+        origin = origin.strip()
+        if origin and origin not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(origin)
 
 
 async def homepage(request):
