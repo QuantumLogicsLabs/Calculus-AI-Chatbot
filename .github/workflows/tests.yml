@@ -19,10 +19,10 @@ jobs:
         python-version: ['3.11', '3.12']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -99,10 +99,10 @@ jobs:
         python-version: ['3.11']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -141,20 +141,27 @@ jobs:
 
     - name: Upload results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-results-real-api
         path: aiService/tests/test_results.json
         retention-days: 30
-# B-2: Redeploy the backend via SnapDeploy once mock tests pass on main.
-  # Requires SNAPDEPLOY_API_KEY and SNAPDEPLOY_APP_ID as repo secrets —
-  # NOT added yet, flagged in the PR. This job will fail until they exist.
+
+  # B-2: Redeploy the backend via SnapDeploy once mock tests pass on main.
+  # Requires SNAPDEPLOY_API_KEY and SNAPDEPLOY_APP_ID as repo secrets.
   deploy-backend:
     name: Deploy Backend (SnapDeploy)
     runs-on: ubuntu-latest
     needs: test-mock
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
+      - name: Check SnapDeploy secrets are configured
+        run: |
+          if [ -z "${{ secrets.SNAPDEPLOY_API_KEY }}" ] || [ -z "${{ secrets.SNAPDEPLOY_APP_ID }}" ]; then
+            echo "::error::SNAPDEPLOY_API_KEY and/or SNAPDEPLOY_APP_ID repo secrets are not set. Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
       - name: Trigger SnapDeploy redeploy
         env:
           SNAPDEPLOY_API_KEY: ${{ secrets.SNAPDEPLOY_API_KEY }}
