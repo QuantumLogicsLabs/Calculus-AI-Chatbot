@@ -21,7 +21,7 @@ GROK_API_KEY = os.getenv("GROK_API_KEY")
 logging.basicConfig(level=logging.INFO)
 
 # Toggle between mock and OpenAI
-USE_MOCK = os.getenv("USE_MOCK", "True").lower() == "true"
+USE_MOCK = os.getenv("USE_MOCK", "False").lower() == "true"
 
 # ─────────────────────────────────────────────────────────────
 # CB-20: Model Fallback & Response Caching — configuration
