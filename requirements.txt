@@ -6,3 +6,4 @@ aiosqlite==0.22.1
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.12
 alembic==1.13.0
+flask-cors==4.0.0
