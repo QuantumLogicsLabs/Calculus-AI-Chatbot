@@ -15,3 +15,7 @@ if extra_origins:
         origin = origin.strip()
         if origin and origin not in ALLOWED_AI_ORIGINS:
             ALLOWED_AI_ORIGINS.append(origin)
+
+
+from flask_cors import CORS
+CORS(app, origins=["https://calculus.quantumlogicslimited.com"])
