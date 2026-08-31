@@ -92,12 +92,13 @@ export async function sendMessage(messages, context, token = null, pageUrl = "/"
       suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
       difficulty: data.difficulty || null, // CB-18
       message_id: data.message_id || null,  // CB-12: for feedback submission
-      session_id: data.session_id || null,  // CB-19: for export / CB-12: for feedback
+      session_id: data.session_id || null,  // CB-12/CB-19: for feedback / export
     };
   } catch {
     throw new Error("Invalid response from chat service.");
   }
 }
+
 /**
  * sendMessageStream — CB-10 (Frontend streaming)
  * Streams tokens from {API_URL}/api/chat/stream (or standalone /chat/stream)
@@ -201,57 +202,6 @@ export async function sendMessageStream(
     onDone({ suggestions, message_id, session_id });
   } catch (err) {
     onError(new Error("Stream interrupted. Please try again."));
-  }
-}
-
-/**
- * createChatSession — CB-13
- * Creates a new backend session for logged-in users. Guests skip this
- * (handled by caller) since guest sessions aren't persisted.
- * NOTE: relies on POST {API_URL}/api/chat/sessions — confirm with backend
- * owner whether this route exists yet.
- */
-export async function createChatSession(token, title = "New Chat") {
-  if (!token) return null;
-  try {
-    const response = await fetchWithTimeout(`${API_URL}/api/chat/sessions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ title }),
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data.session_id || data.id || null;
-  } catch {
-    return null; // fail silently — local reset still works
-  }
-}
-export async function fetchChatHistory(token) {
-  if (!token) return [];
-
-  let response;
-  try {
-    response = await fetchWithTimeout(`${API_URL}/api/chat/history`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-  } catch (err) {
-    if (err.message.includes("taking too long")) throw err;
-    throw new Error("Could not reach the backend server.");
-  }
-
-  if (!response.ok) {
-    if (response.status === 401) throw new Error("Session expired. Please log in again.");
-    throw new Error("Failed to load chat history.");
-  }
-
-  try {
-    const data = await response.json();
-    return data.history || data.sessions || [];
-  } catch {
-    return [];
   }
 }
 
@@ -375,7 +325,6 @@ export async function submitFeedback(messageId, sessionId, feedback, token) {
     throw err;
   }
 }
-
 
 /**
  * createChatSession — CB-13
