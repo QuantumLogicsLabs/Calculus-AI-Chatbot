@@ -10,10 +10,10 @@
 // picks up ones prefixed VITE_ — process.env.REACT_APP_API_URL is a
 // Create React App convention and is never populated by Vite, so this
 // was silently falling back to the localhost default in every build.
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8002";
+const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8002";
 // Same root cause applies here — fixed for consistency so this doesn't
 // become the next B-2-shaped bug once someone actually sets this var.
-const STANDALONE_CHAT_URL = import.meta.env.VITE_CHAT_URL || "";
+const STANDALONE_CHAT_URL = process.env.REACT_APP_CHAT_URL || "";
 const REQUEST_TIMEOUT_MS = 45000;
 
 function getChatEndpoint() {
