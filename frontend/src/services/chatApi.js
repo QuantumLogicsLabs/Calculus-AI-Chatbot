@@ -18,9 +18,9 @@ const REQUEST_TIMEOUT_MS = 45000;
 
 function getChatEndpoint() {
   if (STANDALONE_CHAT_URL) {
-    return `${STANDALONE_CHAT_URL.replace(/\/$/, "")}/chat`;
+    return `${STANDALONE_CHAT_URL.replace(/\/$/, "")}/chat/`; // was: /chat
   }
-  return `${API_URL}/api/chat`;
+  return `${API_URL}/api/chat/`; // was: /api/chat
 }
 
 async function fetchWithTimeout(url, options = {}) {
@@ -126,7 +126,7 @@ export async function sendMessageStream(
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const streamUrl = getChatEndpoint().replace(/\/chat$/, "/chat/stream");
+const streamUrl = getChatEndpoint().replace(/\/chat\/?$/, "/chat/stream");
 
   let response;
   try {
