@@ -332,29 +332,24 @@ function ChatWindow({ onClose, onActivity }) {
           setSuggestions(data.suggestions || []);
           if (data.difficulty) setDifficulty(data.difficulty); // CB-18
           if (data.session_id) setSessionId(data.session_id);  // CB-12/CB-19
-        } catch (err) // ✅ FIXED CODE (Replace the entire catch block with this)
-} catch (err) {
-    // 1. Handle Rate Limiting (HTTP 429)
-    if (err.code === 429) {
-        setBotMessage("⏳ You're sending messages too quickly! Please wait a moment before trying again.");
-        setSuggestions([]);
-        setIsLoading(false);
-        return;
-    }
-
-    // 2. Log the actual error to the console (for debugging)
-    console.error("❌ Chat Error Details:", err);
-
-    // 3. Show a friendly, honest message to the user
-    setBotMessage("⚠️ Sorry, I'm having trouble connecting right now. Please check your internet connection and try again. If this issue persists, contact support.");
-
-    // 4. Clear the suggestion chips so the user isn't confused
-    setSuggestions([]);
-
-    // 5. Ensure the loading state is turned off
-    setIsLoading(false);
-}
-        finally {
+                } catch (err) {
+          const addErrorMessage = (text) => {
+            setMessages((prev) => {
+              const withoutPlaceholder = prev.filter((m) => m.id !== botMsgId);
+              return [
+                ...withoutPlaceholder,
+                { id: botMsgId, role: "assistant", content: text, timestamp: new Date().toISOString() },
+              ];
+            });
+          };
+          if (err.code === 429) {
+            addErrorMessage("⏳ You're sending messages too quickly! Please wait a moment before trying again.");
+          } else {
+            console.error("❌ Chat Error Details:", err);
+            addErrorMessage("⚠️ Sorry, I'm having trouble connecting right now. Please check your internet connection and try again. If this issue persists, contact support.");
+          }
+          setSuggestions([]);
+        } finally {
           setIsLoading(false);
           onActivity?.();
         }
