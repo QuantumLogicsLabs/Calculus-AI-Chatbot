@@ -5,7 +5,7 @@ import "katex/dist/katex.min.css";
 
 function parseLatex(text) {
   const segments = [];
-  const regex = /(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g;
+  const regex = /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\$[^$\n]+?\$|\\\([\s\S]+?\\\))/g;
   let lastIndex = 0;
   let match;
 
@@ -13,17 +13,39 @@ function parseLatex(text) {
     if (match.index > lastIndex) {
       segments.push({ type: "text", content: text.slice(lastIndex, match.index) });
     }
+
     const raw = match[0];
+
     if (raw.startsWith("$$")) {
-      segments.push({ type: "block", content: raw.slice(2, -2).trim() });
+      segments.push({
+        type: "block",
+        content: raw.slice(2, -2).trim()
+      });
+    } else if (raw.startsWith("\\[")) {
+      segments.push({
+        type: "block",
+        content: raw.slice(2, -2).trim()
+      });
+    } else if (raw.startsWith("\\(")) {
+      segments.push({
+        type: "inline",
+        content: raw.slice(2, -2).trim()
+      });
     } else {
-      segments.push({ type: "inline", content: raw.slice(1, -1).trim() });
+      segments.push({
+        type: "inline",
+        content: raw.slice(1, -1).trim()
+      });
     }
+
     lastIndex = regex.lastIndex;
   }
 
   if (lastIndex < text.length) {
-    segments.push({ type: "text", content: text.slice(lastIndex) });
+    segments.push({
+      type: "text",
+      content: text.slice(lastIndex)
+    });
   }
 
   return segments;
@@ -64,36 +86,104 @@ function renderLatexSegments(text, keyPrefix) {
   });
 }
 
+function renderBoldText(text, keyPrefix) {
+  const parts = text.split(/(\*\*[^*]+?\*\*)/g);
+
+  return parts.map((part, i) => {
+    if (
+      part.startsWith("**") &&
+      part.endsWith("**") &&
+      part.length > 4
+    ) {
+      return (
+        <strong key={`${keyPrefix}-b${i}`}>
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+
+    return part
+      ? <span key={`${keyPrefix}-t${i}`}>{part}</span>
+      : null;
+  });
+}
+
 function BotMessageContent({ content }) {
   const cleanedContent = cleanBotContent(content);
-  const blocks = cleanedContent.split(/\n\s*\n/).filter((b) => b.trim());
+  const blocks = cleanedContent
+    .split(/\n\s*\n/)
+    .filter((b) => b.trim());
 
   return (
     <div className="cb-msg-text cb-msg-text--structured">
       {blocks.map((block, bIdx) => {
-        const lines = block.split("\n").filter((l) => l.trim());
-        const isStepList = lines.length > 1 && lines.every((l) => STEP_LINE_RE.test(l.trim()));
+        const lines = block
+          .split("\n")
+          .filter((l) => l.trim());
+
+        const isStepList =
+          lines.length > 1 &&
+          lines.every((l) =>
+            STEP_LINE_RE.test(l.trim())
+          );
 
         if (isStepList) {
           return (
             <ol key={bIdx} className="cb-msg-steps">
               {lines.map((line, lIdx) => (
                 <li key={lIdx} className="cb-msg-step">
-                  {renderLatexSegments(line.replace(/^step\s+\d+[:.)]\s*/i, ""), `b${bIdx}-l${lIdx}`)}
+                  {renderLatexSegments(
+                    line.replace(
+                      /^step\s+\d+[:.)]\s*/i,
+                      ""
+                    ),
+                    `b${bIdx}-l${lIdx}`
+                  )}
                 </li>
               ))}
             </ol>
           );
         }
 
+        const segments = parseLatex(block);
+
         return (
           <p key={bIdx} className="cb-msg-paragraph">
-            {lines.map((line, lIdx) => (
-              <span key={lIdx}>
-                {renderLatexSegments(line, `b${bIdx}-l${lIdx}`)}
-                {lIdx < lines.length - 1 && <br />}
-              </span>
-            ))}
+            {segments.map((seg, sIdx) => {
+              const key = `b${bIdx}-s${sIdx}`;
+
+              if (seg.type === "inline") {
+                return (
+                  <KatexSpan
+                    key={key}
+                    latex={seg.content}
+                    displayMode={false}
+                  />
+                );
+              }
+
+              if (seg.type === "block") {
+                return (
+                  <KatexSpan
+                    key={key}
+                    latex={seg.content}
+                    displayMode={true}
+                  />
+                );
+              }
+
+              return seg.content
+                .split("\n")
+                .map((textLine, tIdx, arr) => (
+                  <span key={`${key}-${tIdx}`}>
+                    {renderBoldText(
+                      textLine,
+                      `${key}-${tIdx}`
+                    )}
+                    {tIdx < arr.length - 1 && <br />}
+                  </span>
+                ));
+            })}
           </p>
         );
       })}
