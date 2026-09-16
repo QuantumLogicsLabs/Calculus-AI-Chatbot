@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY aiService/ ./aiService/
 
 # Default command
-CMD ["uvicorn", "aiService.chatbot:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD uvicorn aiService.chatbot:app --host 0.0.0.0 --port $PORT

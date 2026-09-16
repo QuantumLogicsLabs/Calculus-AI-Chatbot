@@ -10,17 +10,17 @@
 // picks up ones prefixed VITE_ — process.env.REACT_APP_API_URL is a
 // Create React App convention and is never populated by Vite, so this
 // was silently falling back to the localhost default in every build.
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8002";
+const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8002";
 // Same root cause applies here — fixed for consistency so this doesn't
 // become the next B-2-shaped bug once someone actually sets this var.
-const STANDALONE_CHAT_URL = import.meta.env.VITE_CHAT_URL || "";
+const STANDALONE_CHAT_URL = process.env.REACT_APP_CHAT_URL || "";
 const REQUEST_TIMEOUT_MS = 45000;
 
 function getChatEndpoint() {
   if (STANDALONE_CHAT_URL) {
-    return `${STANDALONE_CHAT_URL.replace(/\/$/, "")}/chat`;
+    return `${STANDALONE_CHAT_URL.replace(/\/$/, "")}/chat/`; // was: /chat
   }
-  return `${API_URL}/api/chat`;
+  return `${API_URL}/api/chat/`; // was: /api/chat
 }
 
 async function fetchWithTimeout(url, options = {}) {
@@ -126,7 +126,7 @@ export async function sendMessageStream(
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const streamUrl = getChatEndpoint().replace(/\/chat$/, "/chat/stream");
+const streamUrl = getChatEndpoint().replace(/\/chat\/?$/, "/chat/stream");
 
   let response;
   try {
@@ -178,24 +178,34 @@ export async function sendMessageStream(
       const lines = buffer.split("\n\n");
       buffer = lines.pop(); // keep incomplete chunk for next read
 
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.replace(/^data:\s*/, "");
+           for (const frame of lines) {
+        // Each SSE frame may be a named event ("event: message\ndata: {...}")
+        // or a bare "data: ..." line. Extract only the data: lines.
+        const dataLines = frame
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.replace(/^data:\s*/, ""));
 
-        if (payload === "[DONE]") {
-          onDone({ suggestions, message_id, session_id });
-          return;
-        }
+        for (const payload of dataLines) {
+          if (payload === "[DONE]") {
+            onDone({ suggestions, message_id, session_id });
+            return;
+          }
 
-        try {
-          const parsed = JSON.parse(payload);
-          if (parsed.token) onToken(parsed.token);
-          if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions;
-          if (parsed.message_id) message_id = parsed.message_id;  // CB-12
-          if (parsed.session_id) session_id = parsed.session_id;  // CB-12/CB-19
-        } catch {
-          // plain-text token fallback (not JSON-wrapped)
-          if (payload) onToken(payload);
+          try {
+            const parsed = JSON.parse(payload);
+            const chunk = parsed.delta || parsed.token || "";
+            if (chunk) onToken(chunk);
+            if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions;
+            if (parsed.message_id) message_id = parsed.message_id;
+            if (parsed.session_id) session_id = parsed.session_id;
+            if (parsed.done) {
+              onDone({ suggestions, message_id, session_id });
+              return;
+            }
+          } catch {
+            if (payload) onToken(payload);
+          }
         }
       }
     }

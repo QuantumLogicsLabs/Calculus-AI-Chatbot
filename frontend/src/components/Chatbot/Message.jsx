@@ -220,7 +220,7 @@ function Message({ message, showFeedback = true, messageId = null, sessionId = n
                 </div>
               )}
               <BotMessageContent content={message.content} />
-              {currentStep === totalSteps && (
+              {currentStep !== null && currentStep === totalSteps && (
                 <div className="cb-complete-badge">
                   🏆 Problem solved!
                 </div>
