@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
-
+  
 
 function parseLatex(text) {
   const segments = [];
