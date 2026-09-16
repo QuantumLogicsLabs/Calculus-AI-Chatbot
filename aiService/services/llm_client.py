@@ -131,6 +131,12 @@ STEP F — Generate follow-ups:
   - Not repeating what was just shown?   [ ]
 </scratchpad>
 
+CRITICAL: The <scratchpad> block above is a description of your INTERNAL
+reasoning process only. Do NOT literally output "<scratchpad>", "</scratchpad>",
+or any of the STEP A–F reasoning text in your actual response to the student.
+Your visible response must begin directly with the answer/explanation —
+never with reasoning, classification labels, or scratchpad markup of any kind.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SCOPE — WHAT YOU COVER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
