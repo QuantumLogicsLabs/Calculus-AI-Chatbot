@@ -49,9 +49,10 @@ const STEP_LINE_RE = /^step\s+\d+[:.)]/i;
 
 function cleanBotContent(content) {
   return content
+    .replace(/<scratchpad>[\s\S]*?<\/scratchpad>\s*/i, "")
     .replace(/\[STEP\s+\d+\s+of\s+\d+\]\s*/i, "")
     .replace(/\[FOLLOW_UPS\][\s\S]*?\[\/FOLLOW_UPS\]/gi, "")
-    .trim();
+     .trim();
 }
 
 function renderLatexSegments(text, keyPrefix) {
