@@ -74,4 +74,4 @@ app = Starlette(
         Route("/health", health, methods=["GET"]),
         Mount("/api/chat", routes=chat.routes),
     ],
-)
+)   
