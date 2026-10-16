@@ -1384,3 +1384,12 @@
   font-size: 0.85rem;
   font-weight: 600;
 }
+.cb-demo-notice {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: rgba(190, 140, 40, 0.1);
+  border-bottom: 1px solid rgba(190, 140, 40, 0.2);
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}

@@ -3,35 +3,72 @@ import time
 import asyncio
 import hashlib
 import logging
-from dotenv import load_dotenv
-from openai import AsyncOpenAI
-
-from dotenv import load_dotenv
-import os
+import json
+import math
+from contextvars import ContextVar
+from contextlib import aclosing
 from pathlib import Path
 
-# Load .env from the SAME folder as this file (fixes Docker/CI issues)
-env_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=env_path)
+from dotenv import load_dotenv
+from openai import AsyncOpenAI, APITimeoutError
 
-# Now you can get your API keys securely
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-# Configure logging
+load_dotenv(Path(__file__).parent / ".env")
 logging.basicConfig(level=logging.INFO)
 
-# Toggle between mock and OpenAI
-USE_MOCK = os.getenv("USE_MOCK", "True").lower() == "true"
-logging.warning(f"STARTUP_CONFIG: USE_MOCK={USE_MOCK} (raw env value: {os.getenv('USE_MOCK')!r})")
+# Fail closed: demo responses require an explicit opt-in.
+_mode = os.getenv("USE_MOCK", "False").strip().lower()
+if _mode not in {"true", "false"}:
+    raise RuntimeError("USE_MOCK must be True or False.")
+USE_MOCK = _mode == "true"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+if not MODEL:
+    raise RuntimeError("GROQ_MODEL must not be empty.")
 
-# ─────────────────────────────────────────────────────────────
-# CB-20: Model Fallback & Response Caching — configuration
-# ─────────────────────────────────────────────────────────────
-FALLBACK_MODE = "mock_degrade"
-PRIMARY_TIMEOUT_SECONDS = float(os.getenv("PRIMARY_TIMEOUT_SECONDS", "12"))
-LLM_CACHE_TTL_SECONDS = int(os.getenv("LLM_CACHE_TTL_SECONDS", "300"))
-CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("CIRCUIT_FAILURE_THRESHOLD", "3"))
-CIRCUIT_RESET_SECONDS = int(os.getenv("CIRCUIT_RESET_SECONDS", "60"))
+
+def _number_setting(name, default, *, integer=False, allow_zero=False):
+    try:
+        value = (int if integer else float)(os.getenv(name, str(default)))
+        if not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero):
+            raise ValueError
+        return value
+    except ValueError:
+        raise RuntimeError(f"{name} must be a {'nonnegative' if allow_zero else 'positive'} number.") from None
+
+
+PRIMARY_TIMEOUT_SECONDS = _number_setting("PRIMARY_TIMEOUT_SECONDS", 12)
+STREAM_TOTAL_TIMEOUT_SECONDS = _number_setting("STREAM_TOTAL_TIMEOUT_SECONDS", 40)
+LLM_CACHE_TTL_SECONDS = _number_setting("LLM_CACHE_TTL_SECONDS", 300, integer=True, allow_zero=True)
+CIRCUIT_FAILURE_THRESHOLD = _number_setting("CIRCUIT_FAILURE_THRESHOLD", 3, integer=True)
+CIRCUIT_RESET_SECONDS = _number_setting("CIRCUIT_RESET_SECONDS", 60)
+_source = ContextVar("llm_response_source", default="unknown")
+
+
+class LLMUnavailable(Exception):
+    """Safe public errors; provider exception bodies must never reach clients."""
+    def __init__(self, code="ai_unavailable"):
+        self.code = code
+        self.status_code = 504 if code == "ai_timeout" else 503
+        self.public_message = (
+            "The tutor took too long to respond. Please try again."
+            if code == "ai_timeout" else
+            "The tutor is temporarily unavailable. Please try again."
+        )
+        super().__init__(self.public_message)
+
+
+def response_metadata():
+    return {"mode": "mock" if USE_MOCK else "live", "source": _source.get(),
+            "model": None if USE_MOCK else MODEL}
+
+
+def _log_source(source, *, streaming=False):
+    _source.set(source)
+    logging.info("LLM_RESPONSE_SOURCE: served_by=%s mode=%s model=%s stream=%s",
+                 source, "mock" if USE_MOCK else "live", "mock" if USE_MOCK else MODEL, streaming)
+
+
+logging.warning("STARTUP_CONFIG: mode=%s provider=groq model=%s", "mock" if USE_MOCK else "live", MODEL)
 
 # ─────────────────────────────────────────────────────────────
 # CAL SYSTEM PROMPT — v4 (T6 revision)
@@ -297,10 +334,14 @@ def _build_system_content(topic: str, difficulty: str) -> str:
     return system_content
 
 
-client = AsyncOpenAI(
-    api_key=os.getenv("GROQ_API_KEY"),
-    base_url="https://api.groq.com/openai/v1"
+client = (
+    AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1",
+                max_retries=0, timeout=PRIMARY_TIMEOUT_SECONDS)
+    if GROQ_API_KEY else None
 )
+
+if not USE_MOCK and client is None:
+    raise RuntimeError("Set GROQ_API_KEY to use the real tutor, or set USE_MOCK=True for a local demo.")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -340,7 +381,7 @@ class CircuitBreaker:
                 logging.info("CIRCUIT_BREAKER: reset window elapsed, trying half-open request")
                 return True
             return False
-        return True
+        return False  # A half-open probe is already in flight.
 
 
 _primary_circuit = CircuitBreaker(
@@ -361,37 +402,13 @@ _response_cache: dict = {}
 _CACHE_HISTORY_WINDOW = 10
 
 
-def _cache_key(message: str, topic: str, difficulty: str, history: list = None) -> str:
-    """
-    OB-3 fix: previously this key only hashed (message, topic, difficulty),
-    which meant two different conversations asking the same literal
-    follow-up ("can you explain more?", "yes", "why though?") would collide
-    on the exact same cache entry and get served an answer generated for a
-    completely different prior context.
-
-    Fix: fold a normalized representation of the trailing conversation
-    history into the key, using the SAME trailing window
-    (_CACHE_HISTORY_WINDOW) that _build_messages() actually sends to the
-    model. This guarantees the cache key always reflects exactly the
-    context the LLM would see, so:
-      - identical message + identical history  -> cache HIT (fast path preserved)
-      - identical message + different history   -> cache MISS (correct, no collision)
-    """
-    history = history or []
-    trimmed_history = history[-_CACHE_HISTORY_WINDOW:] if len(history) > _CACHE_HISTORY_WINDOW else history
-
-    history_fingerprint = "||".join(
-        f"{(item.get('role') or '').strip().lower()}:{(item.get('content') or '').strip().lower()}"
-        for item in trimmed_history
-    )
-
-    raw = (
-        f"{(message or '').strip().lower()}|"
-        f"{(topic or '').strip().lower()}|"
-        f"{difficulty}|"
-        f"{history_fingerprint}"
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+def _cache_key(message: str, topic: str, difficulty: str, history: list = None, summary: str = "") -> str:
+    # Exact text matters in math (x and X differ). Include all model context,
+    # mode and model so mock, live and different summaries cannot collide.
+    payload = {"message": message, "topic": topic, "difficulty": difficulty,
+               "history": (history or [])[-_CACHE_HISTORY_WINDOW:], "summary": summary,
+               "mode": "mock" if USE_MOCK else "live", "model": MODEL}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _cache_get(key: str):
@@ -449,67 +466,36 @@ History Length:
 {len(history)} messages
 
 This is a placeholder response.
-OpenAI integration will be used when USE_MOCK=False.
+Demo mode is enabled. Set USE_MOCK=False with a Groq key for real tutoring.
 """
 
 
-async def ask_openai(
-    message: str,
-    topic: str = "",
-    history: list = None,
-    difficulty: str = "intermediate",
-    summary: str = ""
-):
-    if history is None:
-        history = []
-
-    messages = _build_messages(message, topic, difficulty, history, summary)
-
-    served_by = "primary"
-    response_content = None
-
-    if _primary_circuit.allow_request():
-        try:
-            response = await asyncio.wait_for(
-                  client.chat.completions.create(
-                    model="openai/gpt-oss-120b",
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=1000
-                ),
-                timeout=PRIMARY_TIMEOUT_SECONDS
-            )
-            response_content = response.choices[0].message.content
-            _primary_circuit.record_success()
-        except Exception as e:
-            _primary_circuit.record_failure()
-            logging.warning(f"PRIMARY_PROVIDER_FAILURE: {type(e).__name__}: {str(e)}")
-    else:
-        logging.info("CIRCUIT_BREAKER: open, skipping primary call and degrading to mock")
-
-    if response_content is None:
-        served_by = "fallback_mock"
-        response_content = await ask_mock(message, topic, history, difficulty, summary)
-
-    logging.info(f"LLM_RESPONSE_SOURCE: served_by={served_by} model={'openai/gpt-oss-120b' if served_by == 'primary' else 'mock'}")
-    # CB-8: Scope violation detection
-    # Widened to match every topic in the SCOPE section of the system
-    # prompt (added: continuity, linearization, chain rule, directional).
-    calculus_keywords = [
-        "derivative", "integral", "gradient", "limit", "vector",
-        "lagrange", "taylor", "partial", "curl", "divergence",
-        "multivariable", "calculus", "differentiate", "integrate",
-        "continuity", "continuous", "linearization", "chain rule",
-        "directional", "tangent plane", "constrained optimization"
-    ]
-
-    has_calculus_keyword = any(kw in message.lower() for kw in calculus_keywords)
-    has_cal_refusal = "I'm Cal" in response_content
-
-    if not has_cal_refusal and not has_calculus_keyword:
-        logging.warning(f"SCOPE_VIOLATION: possible off-topic response for message: {message[:80]}")
-
-    return response_content
+async def ask_openai(message: str, topic: str = "", history: list = None,
+                     difficulty: str = "intermediate", summary: str = ""):
+    if not _primary_circuit.allow_request():
+        logging.warning("LLM_REQUEST_FAILED: code=circuit_open")
+        raise LLMUnavailable()
+    try:
+        if client is None:
+            raise LLMUnavailable()
+        response = await asyncio.wait_for(client.chat.completions.create(
+            model=MODEL, messages=_build_messages(message, topic, difficulty, history, summary),
+            temperature=0.3, max_tokens=1000,
+        ), timeout=PRIMARY_TIMEOUT_SECONDS)
+        choice = response.choices[0]
+        content = choice.message.content
+        if not content or not content.strip() or choice.finish_reason != "stop":
+            raise LLMUnavailable("ai_incomplete")
+    except Exception as exc:
+        _primary_circuit.record_failure()
+        code = "ai_timeout" if isinstance(exc, (TimeoutError, APITimeoutError)) else "ai_unavailable"
+        if isinstance(exc, LLMUnavailable):
+            code = exc.code
+        logging.warning("LLM_REQUEST_FAILED: code=%s type=%s", code, type(exc).__name__)
+        raise LLMUnavailable(code) from None
+    _primary_circuit.record_success()
+    _log_source("primary")
+    return content
 
 
 async def ask_mock_stream(
@@ -539,105 +525,93 @@ async def ask_mock_stream(
         await asyncio.sleep(0.03)
 
 
-async def ask_openai_stream(
-    message: str,
-    topic: str = "",
-    history: list = None,
-    difficulty: str = "intermediate",
-    summary: str = ""
-):
-    if history is None:
-        history = []
-
-    messages = _build_messages(message, topic, difficulty, history, summary)
-
-    got_any_token = False
-
-    if _primary_circuit.allow_request():
-        try:
-            stream = await asyncio.wait_for(
-                  client.chat.completions.create(
-                    model="openai/gpt-oss-120b",
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=1000,
-                    stream=True,
-                ),
-                timeout=PRIMARY_TIMEOUT_SECONDS
-            )
-            async for chunk in stream:
+async def ask_openai_stream(message: str, topic: str = "", history: list = None,
+                            difficulty: str = "intermediate", summary: str = ""):
+    if not _primary_circuit.allow_request():
+        logging.warning("LLM_REQUEST_FAILED: code=circuit_open stream=True")
+        raise LLMUnavailable()
+    stream = None
+    got_token = False
+    finished = False
+    try:
+        if client is None:
+            raise LLMUnavailable()
+        async with asyncio.timeout(STREAM_TOTAL_TIMEOUT_SECONDS):
+            stream = await asyncio.wait_for(client.chat.completions.create(
+                model=MODEL, messages=_build_messages(message, topic, difficulty, history, summary),
+                temperature=0.3, max_tokens=1000, stream=True,
+            ), timeout=PRIMARY_TIMEOUT_SECONDS)
+            iterator = stream.__aiter__()
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(anext(iterator), timeout=PRIMARY_TIMEOUT_SECONDS)
+                except StopAsyncIteration:
+                    break
                 if not chunk.choices:
                     continue
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    got_any_token = True
-                    yield delta
-            _primary_circuit.record_success()
-            logging.info("LLM_RESPONSE_SOURCE: served_by=primary model=openai/gpt-oss-120b (stream)")
-            return
-        except Exception as e:
+                choice = chunk.choices[0]
+                if choice.delta.content:
+                    got_token = True
+                    yield choice.delta.content
+                if choice.finish_reason:
+                    if choice.finish_reason != "stop":
+                        raise LLMUnavailable("ai_incomplete")
+                    finished = True
+                    break
+            if not got_token or not finished:
+                raise LLMUnavailable("ai_incomplete")
+    except Exception as exc:
+        _primary_circuit.record_failure()
+        code = "ai_timeout" if isinstance(exc, (TimeoutError, APITimeoutError)) else "ai_unavailable"
+        if isinstance(exc, LLMUnavailable):
+            code = exc.code
+        logging.warning("LLM_REQUEST_FAILED: code=%s type=%s stream=True", code, type(exc).__name__)
+        raise LLMUnavailable(code) from None
+    finally:
+        if stream is not None:
+            try:
+                await stream.close()
+            except Exception:
+                logging.warning("LLM_STREAM_CLOSE_FAILED")
+        # A cancelled half-open probe must not leave the breaker stuck forever.
+        if not (finished and got_token) and _primary_circuit.state == "half_open":
             _primary_circuit.record_failure()
-            logging.warning(f"PRIMARY_PROVIDER_FAILURE (stream): {type(e).__name__}: {str(e)}")
-            if got_any_token:
-                return
-    else:
-        logging.info("CIRCUIT_BREAKER: open, skipping primary stream and degrading to mock")
-
-    logging.info("LLM_RESPONSE_SOURCE: served_by=fallback_mock (stream)")
-    async for chunk in ask_mock_stream(message, topic, history, difficulty, summary):
-        yield chunk
+    _primary_circuit.record_success()
+    _log_source("primary", streaming=True)
 
 
-async def ask_llm_stream(
-    message: str,
-    topic: str = "",
-    history: list = None,
-    difficulty: str = "intermediate",
-    summary: str = ""
-):
-    # OB-3 fix: history is now part of the cache key (see _cache_key docstring).
-    cache_key = _cache_key(message, topic, difficulty, history)
+async def ask_llm_stream(message: str, topic: str = "", history: list = None,
+                         difficulty: str = "intermediate", summary: str = ""):
+    cache_key = _cache_key(message, topic, difficulty, history, summary)
     cached = _cache_get(cache_key)
     if cached is not None:
-        logging.info("LLM_RESPONSE_SOURCE: served_by=cache (stream)")
-        for word in cached.split(" "):
-            yield word + " "
-            await asyncio.sleep(0.01)
+        _log_source("cache", streaming=True)
+        yield cached
         return
-
     chunks = []
+    generator = ask_mock_stream if USE_MOCK else ask_openai_stream
+    async with aclosing(generator(message, topic, history, difficulty, summary)) as stream:
+        async for chunk in stream:
+            chunks.append(chunk)
+            yield chunk
     if USE_MOCK:
-        async for chunk in ask_mock_stream(message, topic, history, difficulty, summary):
-            chunks.append(chunk)
-            yield chunk
-    else:
-        async for chunk in ask_openai_stream(message, topic, history, difficulty, summary):
-            chunks.append(chunk)
-            yield chunk
-
+        _log_source("mock", streaming=True)
     if chunks:
         _cache_set(cache_key, "".join(chunks))
 
 
-async def ask_llm(
-    message: str,
-    topic: str = "",
-    history: list = None,
-    difficulty: str = "intermediate",
-    summary: str = ""
-):
-    # OB-3 fix: history is now part of the cache key (see _cache_key docstring).
-    cache_key = _cache_key(message, topic, difficulty, history)
+async def ask_llm(message: str, topic: str = "", history: list = None,
+                  difficulty: str = "intermediate", summary: str = ""):
+    cache_key = _cache_key(message, topic, difficulty, history, summary)
     cached = _cache_get(cache_key)
     if cached is not None:
-        logging.info("LLM_RESPONSE_SOURCE: served_by=cache")
+        _log_source("cache")
         return cached
-
     if USE_MOCK:
         result = await ask_mock(message, topic, history, difficulty, summary)
+        _log_source("mock")
     else:
         result = await ask_openai(message, topic, history, difficulty, summary)
-
     _cache_set(cache_key, result)
     return result
 
@@ -648,15 +622,23 @@ was already explained. Do not include LaTeX or follow-up suggestions."""
 
 
 async def summarize_history(messages: list, previous_summary: str = "") -> str:
+    if USE_MOCK:
+        recent = messages[-6:]
+        return "Mock conversation summary: " + " ".join(
+            f"{m['role']}: {m['content'][:120]}" for m in recent
+        )
     content = f"Previous summary: {previous_summary}\n\n" if previous_summary else ""
     content += "\n".join(f"{m['role']}: {m['content']}" for m in messages)
-    response = await client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[
-            {"role": "system", "content": SUMMARY_PROMPT},
-            {"role": "user", "content": content},
-        ],
-        temperature=0.2,
-        max_tokens=200,
-    )
-    return response.choices[0].message.content.strip()
+    try:
+        response = await asyncio.wait_for(client.chat.completions.create(
+            model=MODEL, messages=[{"role": "system", "content": SUMMARY_PROMPT},
+                                  {"role": "user", "content": content}],
+            temperature=0.2, max_tokens=200,
+        ), timeout=PRIMARY_TIMEOUT_SECONDS)
+        choice = response.choices[0]
+        if choice.finish_reason != "stop" or not choice.message.content:
+            raise LLMUnavailable("ai_incomplete")
+        return choice.message.content.strip()
+    except Exception as exc:
+        logging.warning("LLM_SUMMARY_FAILED: type=%s", type(exc).__name__)
+        raise LLMUnavailable() from None

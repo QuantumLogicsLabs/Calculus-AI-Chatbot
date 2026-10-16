@@ -3,6 +3,7 @@ aiService/chatbot.py - CalcVoyager AI Service
 Starlette app exposing /chat, /chat/stream, /summarize.
 """
 import json
+import logging
 import os
 from typing import AsyncGenerator
 
@@ -13,7 +14,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
-from aiService.services.llm_client import ask_llm, ask_llm_stream, summarize_history
+from aiService.services.llm_client import (
+    ask_llm, ask_llm_stream, summarize_history, LLMUnavailable, response_metadata,
+)
 
 ALLOWED_AI_ORIGINS = [
     "https://calculus.quantumlogicslimited.com",
@@ -36,7 +39,18 @@ async def homepage(request: Request):
 
 
 async def health(request: Request):
-    return JSONResponse({"status": "healthy"})
+    return JSONResponse({"status": "healthy", "mode": response_metadata()["mode"],
+                         "provider_checked": False})
+
+
+def _valid_chat_body(body):
+    return (
+        isinstance(body, dict) and isinstance(body.get("message"), str) and bool(body["message"].strip())
+        and all(isinstance(body.get(key, ""), str) for key in ("topic", "summary", "difficulty"))
+        and isinstance(body.get("history", []), list)
+        and all(isinstance(item, dict) and item.get("role") in {"user", "assistant"}
+                and isinstance(item.get("content"), str) for item in body.get("history", []))
+    )
 
 
 async def chat_endpoint(request: Request):
@@ -45,9 +59,9 @@ async def chat_endpoint(request: Request):
     except Exception:
         return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
 
-    message = body.get("message", "")
-    if not message:
-        return JSONResponse({"detail": "message is required"}, status_code=400)
+    if not _valid_chat_body(body):
+        return JSONResponse({"detail": "A message and valid conversation history are required"}, status_code=400)
+    message = body["message"]
 
     topic = body.get("topic", "")
     difficulty = body.get("difficulty", "intermediate")
@@ -59,10 +73,14 @@ async def chat_endpoint(request: Request):
             message=message, topic=topic, history=history,
             difficulty=difficulty, summary=summary,
         )
-    except Exception as e:
-        return JSONResponse({"detail": f"LLM error: {str(e)}"}, status_code=502)
+    except LLMUnavailable as exc:
+        return JSONResponse({"detail": exc.public_message, "code": exc.code}, status_code=exc.status_code)
+    except Exception as exc:
+        logging.error("AI_CHAT_FAILED: type=%s", type(exc).__name__)
+        return JSONResponse({"detail": "The tutor is temporarily unavailable. Please try again.",
+                             "code": "ai_unavailable"}, status_code=503)
 
-    return JSONResponse({"answer": answer, "suggestions": []})
+    return JSONResponse({"answer": answer, "suggestions": [], **response_metadata()})
 
 
 async def chat_stream_endpoint(request: Request):
@@ -71,9 +89,9 @@ async def chat_stream_endpoint(request: Request):
     except Exception:
         return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
 
-    message = body.get("message", "")
-    if not message:
-        return JSONResponse({"detail": "message is required"}, status_code=400)
+    if not _valid_chat_body(body):
+        return JSONResponse({"detail": "A message and valid conversation history are required"}, status_code=400)
+    message = body["message"]
 
     topic = body.get("topic", "")
     difficulty = body.get("difficulty", "intermediate")
@@ -87,10 +105,14 @@ async def chat_stream_endpoint(request: Request):
                 difficulty=difficulty, summary=summary,
             ):
                 yield f"data: {json.dumps({'delta': token})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        except LLMUnavailable as exc:
+            yield f"event: error\ndata: {json.dumps({'error': exc.public_message, 'code': exc.code})}\n\n"
             return
-        yield "data: [DONE]\n\n"
+        except Exception as exc:
+            logging.error("AI_STREAM_FAILED: type=%s", type(exc).__name__)
+            yield f"event: error\ndata: {json.dumps({'error': 'The tutor is temporarily unavailable. Please try again.', 'code': 'ai_unavailable'})}\n\n"
+            return
+        yield f"data: {json.dumps({'done': True, **response_metadata()})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -109,13 +131,18 @@ async def summarize_endpoint(request: Request):
     except Exception:
         return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
 
+    if not isinstance(body, dict) or not isinstance(body.get("messages", []), list):
+        return JSONResponse({"detail": "messages must be an array"}, status_code=400)
     messages = body.get("messages", [])
     previous_summary = body.get("previous_summary", "")
 
     try:
         summary = await summarize_history(messages, previous_summary)
-    except Exception as e:
-        return JSONResponse({"detail": f"Summarize error: {str(e)}"}, status_code=502)
+    except LLMUnavailable as exc:
+        return JSONResponse({"detail": exc.public_message, "code": exc.code}, status_code=exc.status_code)
+    except Exception as exc:
+        logging.error("AI_SUMMARY_FAILED: type=%s", type(exc).__name__)
+        return JSONResponse({"detail": "Conversation summary is unavailable.", "code": "ai_unavailable"}, status_code=503)
 
     return JSONResponse({"summary": summary})
 

@@ -6,13 +6,12 @@
  * Standalone (Beanie):   POST {REACT_APP_CHAT_URL}/chat
  */
 
-// B-2 fix: Vite only exposes env vars via import.meta.env, and only
-// picks up ones prefixed VITE_ — process.env.REACT_APP_API_URL is a
-// Create React App convention and is never populated by Vite, so this
-// was silently falling back to the localhost default in every build.
-const API_URL = process.env.REACT_APP_API_URL || "http://127.0.0.1:8002";
-// Same root cause applies here — fixed for consistency so this doesn't
-// become the next B-2-shaped bug once someone actually sets this var.
+// react-scripts injects REACT_APP_* variables at start/build time.
+// Bundled production builds use the same origin as the page.
+const API_URL = process.env.REACT_APP_API_URL || (
+  process.env.NODE_ENV === "production" ? "" : "http://127.0.0.1:8002"
+);
+// Optional direct AI-service mode; leave empty for the integrated backend.
 const STANDALONE_CHAT_URL = process.env.REACT_APP_CHAT_URL || "";
 const REQUEST_TIMEOUT_MS = 45000;
 
@@ -88,11 +87,13 @@ export async function sendMessage(messages, context, token = null, pageUrl = "/"
   try {
     const data = await response.json();
     return {
-      reply: data.reply || data.response || "",
+      reply: data.reply || data.response || data.answer || "",
       suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
       difficulty: data.difficulty || null, // CB-18
       message_id: data.message_id || null,  // CB-12: for feedback submission
       session_id: data.session_id || null,  // CB-12/CB-19: for feedback / export
+      mode: data.mode || null,
+      source: data.source || null,
     };
   } catch {
     throw new Error("Invalid response from chat service.");
@@ -102,7 +103,7 @@ export async function sendMessage(messages, context, token = null, pageUrl = "/"
 /**
  * sendMessageStream — CB-10 (Frontend streaming)
  * Streams tokens from {API_URL}/api/chat/stream (or standalone /chat/stream)
- * via SSE-over-fetch. Falls back gracefully if the endpoint isn't available yet.
+ * via SSE-over-fetch. Reports errors explicitly; only unsupported routes permit fallback.
  *
  * @param {Array<{role: string, content: string}>} messages
  * @param {string} context
@@ -114,104 +115,86 @@ export async function sendMessage(messages, context, token = null, pageUrl = "/"
  * @param {(err: Error) => void} onError
  */
 export async function sendMessageStream(
-  messages,
-  context,
-  token = null,
-  pageUrl = "/",
-  topicKey = "",
-  onToken = () => {},
-  onDone = () => {},
-  onError = () => {}
+  messages, context, token = null, pageUrl = "/", topicKey = "",
+  onToken = () => {}, onDone = () => {}, onError = () => {}
 ) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-
-const streamUrl = getChatEndpoint().replace(/\/chat\/?$/, "/chat/stream");
-
-  let response;
+  const streamUrl = getChatEndpoint().replace(/\/chat\/?$/, "/chat/stream");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let reader;
+  let receivedText = false;
   try {
-    response = await fetch(streamUrl, {
-      method: "POST",
-      headers,
+    const response = await fetch(streamUrl, {
+      method: "POST", headers, signal: controller.signal,
       body: JSON.stringify({ messages, context, topic_key: topicKey, page_url: pageUrl }),
     });
-  } catch (err) {
-    onError(new Error("Could not reach the chat service. Make sure the backend is running."));
-    return;
-  }
-
-  // CB-11/CB-14: Handle rate limiting (429 Too Many Requests)
-  if (response.status === 429) {
-    let detail = "Rate limit exceeded. Please try again later.";
-    let retryAfter = 60;
-    try {
-      const err = await response.json();
-      detail = err.detail || detail;
-      retryAfter = err.retry_after || retryAfter;
-    } catch {}
-    const error = new Error(detail);
-    error.retryAfter = retryAfter;
-    error.code = 429;
-    onError(error);
-    return;
-  }
-
-  if (!response.ok || !response.body) {
-    onError(new Error("Streaming not available. Falling back."));
-    return;
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let suggestions = [];
-  let message_id = null;  // CB-12: capture for feedback
-  let session_id = null;  // CB-12/CB-19: capture for feedback/export
-
-  try {
-    // eslint-disable-next-line no-constant-condition
+    if (!response.ok) {
+      let body = {};
+      try { body = await response.json(); } catch {}
+      const error = new Error(body.detail || "The tutor is temporarily unavailable. Please try again.");
+      error.code = response.status;
+      error.retryAfter = body.retry_after;
+      // Only missing streaming support permits a single non-streaming retry.
+      error.canFallback = [404, 405, 501].includes(response.status);
+      throw error;
+    }
+    if (!response.body) throw new Error("The tutor response was incomplete. Please try again.");
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let final = { suggestions: [], message_id: null, session_id: null, mode: null, source: null };
+    const processFrame = async (frame) => {
+      const payload = frame.split(/\r?\n/).filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart()).join("\n");
+      if (!payload) return false;
+      let parsed;
+      if (payload === "[DONE]") parsed = { done: true };
+      else {
+        try { parsed = JSON.parse(payload); }
+        catch { throw new Error("The tutor response was incomplete. Please try again."); }
+      }
+      if (!parsed || typeof parsed !== "object") throw new Error("Invalid tutor response.");
+      if (parsed.error) throw new Error(parsed.code === "ai_timeout"
+        ? "The tutor took too long to respond. Please try again."
+        : "The tutor could not complete the answer. Please try again.");
+      const chunk = parsed.delta || parsed.token || "";
+      if (typeof chunk !== "string") throw new Error("Invalid tutor response.");
+      if (chunk) { receivedText = true; onToken(chunk); }
+      if (Array.isArray(parsed.suggestions)) final.suggestions = parsed.suggestions;
+      for (const key of ["message_id", "session_id", "mode", "source", "difficulty"]) {
+        if (parsed[key] != null) final[key] = parsed[key];
+      }
+      if (parsed.done) {
+        if (!receivedText) throw new Error("The tutor returned an empty answer. Please try again.");
+        await onDone(final);
+        return true;
+      }
+      return false;
+    };
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n\n");
-      buffer = lines.pop(); // keep incomplete chunk for next read
-
-           for (const frame of lines) {
-        // Each SSE frame may be a named event ("event: message\ndata: {...}")
-        // or a bare "data: ..." line. Extract only the data: lines.
-        const dataLines = frame
-          .split("\n")
-          .filter((l) => l.startsWith("data:"))
-          .map((l) => l.replace(/^data:\s*/, ""));
-
-        for (const payload of dataLines) {
-          if (payload === "[DONE]") {
-            onDone({ suggestions, message_id, session_id });
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(payload);
-            const chunk = parsed.delta || parsed.token || "";
-            if (chunk) onToken(chunk);
-            if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions;
-            if (parsed.message_id) message_id = parsed.message_id;
-            if (parsed.session_id) session_id = parsed.session_id;
-            if (parsed.done) {
-              onDone({ suggestions, message_id, session_id });
-              return;
-            }
-          } catch {
-            if (payload) onToken(payload);
-          }
-        }
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop();
+      for (const frame of frames) if (await processFrame(frame)) return;
+      if (done) {
+        if (buffer.trim() && await processFrame(buffer)) return;
+        throw new Error("The tutor response was interrupted. Please try again.");
       }
     }
-    onDone({ suggestions, message_id, session_id });
-  } catch (err) {
-    onError(new Error("Stream interrupted. Please try again."));
+  } catch (error) {
+    if (error.name === "AbortError") error = new Error("The tutor took too long to respond. Please try again.");
+    if (error instanceof TypeError) error = new Error("Could not connect to the tutor. Please try again.");
+    if (receivedText) error.canFallback = false;
+    await onError(error);
+  } finally {
+    clearTimeout(timer);
+    if (reader) {
+      try { await reader.cancel(); } catch {}
+      reader.releaseLock?.();
+    }
   }
 }
 

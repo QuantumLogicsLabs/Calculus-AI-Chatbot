@@ -14,6 +14,7 @@ Does NOT validate:
 """
 
 import asyncio
+import os
 import json
 import re
 from pathlib import Path
@@ -22,7 +23,8 @@ from aiService.services.llm_client import ask_llm, _cache_key, _response_cache  
 from aiService.services.math_verifier import verify_cal_math  # CB-16
 
 QUESTIONS_FILE = Path(__file__).parent / "calculus_questions.json"
-OUTPUT_FILE = Path(__file__).parent / "test_results.json"
+RESULTS_DIR = Path(os.getenv("CALCVOYAGER_TEST_RESULTS_DIR", "test-results"))
+OUTPUT_FILE = RESULTS_DIR / "test_results.json"
 
 
 class TestResult:
@@ -98,7 +100,11 @@ def check_latex_syntax_validity(response: str) -> tuple[bool, str]:
     if dollar_count % 2 != 0:
         errors.append("Unbalanced '$' delimiters (odd count)")
 
-    if re.search(r'\${1,2}\s*\${1,2}', response):
+    # Match complete display blocks before inline blocks. The old expression
+    # interpreted the opening $$ of every valid display equation as empty math.
+    math_blocks = re.finditer(r'\$\$([\s\S]*?)\$\$|\$([^$\n]*?)\$', response)
+    if any(not (m.group(1) if m.group(1) is not None else m.group(2)).strip()
+           for m in math_blocks):
         errors.append("Empty math block found ($$ $$ or $ $)")
 
     for command in ['frac', 'sqrt', 'boxed']:
@@ -121,7 +127,7 @@ def check_latex_syntax_validity(response: str) -> tuple[bool, str]:
             if not closed:
                 errors.append(f"Unbalanced braces after \\{command}{{")
 
-    if re.search(r'\\(?![a-zA-Z{}$])', response):
+    if re.search(r'(?<!\\)\\\s*$', response):
         errors.append("Dangling backslash (incomplete LaTeX command)")
 
     if not _braces_balanced(response):
@@ -151,7 +157,7 @@ def check_word_count(response: str) -> tuple[bool, str]:
     words = response.split()
     word_count = len(words)
 
-    if word_count > 450:
+    if word_count > 400:
         return False, f"Response too long: {word_count} words (max 400 for walkthroughs)"
     elif word_count < 20:
         return False, f"Response too short: {word_count} words"
@@ -255,7 +261,8 @@ async def run_scope_enforcement_suite() -> bool:
             for q, r in zip(OFF_TOPIC_QUESTIONS, results)
         ]
     }
-    scope_file = Path(__file__).parent / "scope_results.json"
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    scope_file = RESULTS_DIR / "scope_results.json"
     with open(scope_file, 'w', encoding='utf-8') as f:
         json.dump(scope_output, f, indent=2, ensure_ascii=False)
 
@@ -621,7 +628,7 @@ async def run_test_suite():
     print("=" * 60)
     print()
 
-    correctness_results = [r for r in results if r.correctness_score > 0]
+    correctness_results = [r for r in results if r.correctness_score is not None]
     if correctness_results:
         print("Correctness Scores (answer key matching):")
         for result in correctness_results:
@@ -672,6 +679,7 @@ async def run_test_suite():
         "results": [r.to_dict() for r in results]
     }
 
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
 
@@ -687,6 +695,11 @@ async def run_test_suite():
         print("  Review failed tests and refine system prompt")
 
     return passed_count >= 18, cb9_met
+
+
+def acceptance_exit_code(*checks):
+    """Failed or absent acceptance results must fail the command/CI job."""
+    return 0 if checks and all(checks) else 1
 
 
 if __name__ == "__main__":
@@ -716,10 +729,8 @@ if __name__ == "__main__":
         all_passed = cb2_passed and cb8_passed and cb9_passed and ob3_passed  # OB-3: added to gate
         if all_passed:
             print("ALL ACCEPTANCE CRITERIA MET")
-            import sys
-            sys.exit(0)
         else:
             print("SOME CRITERIA NOT MET - Review failed tests above")
-        print()
+        return acceptance_exit_code(cb2_passed, cb8_passed, cb9_passed, ob3_passed)
 
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

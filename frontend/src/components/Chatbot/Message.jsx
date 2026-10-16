@@ -148,7 +148,7 @@ function BotMessageContent({ content }) {
         const segments = parseLatex(block);
 
         return (
-          <p key={bIdx} className="cb-msg-paragraph">
+          <div key={bIdx} className="cb-msg-paragraph">
             {segments.map((seg, sIdx) => {
               const key = `b${bIdx}-s${sIdx}`;
 
@@ -184,7 +184,7 @@ function BotMessageContent({ content }) {
                   </span>
                 ));
             })}
-          </p>
+          </div>
         );
       })}
     </div>
