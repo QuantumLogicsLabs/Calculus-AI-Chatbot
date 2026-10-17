@@ -103,6 +103,7 @@ function ChatWindow({ onClose, onActivity }) {
   const [sessionId, setSessionId] = useState(null);
   const [difficulty, setDifficulty] = useState(null); // CB-18
   const [exporting, setExporting] = useState(false); // CB-19
+  const [responseMode, setResponseMode] = useState(null);
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -290,7 +291,8 @@ function ChatWindow({ onClose, onActivity }) {
       pageUrl,
       topic,  // CB-18: topicKey parameter
       appendToken,
-      ({ suggestions: finalSuggestions, message_id, session_id }) => {
+      ({ suggestions: finalSuggestions, message_id, session_id, mode }) => {
+        setResponseMode(mode || null);
         setMessages((prev) => {
           const exists = prev.some((m) => m.id === botMsgId);
           if (!exists) {
@@ -311,43 +313,30 @@ function ChatWindow({ onClose, onActivity }) {
         setIsLoading(false);
         onActivity?.();
       },
-      async () => {
-        // Streaming failed/unavailable — fall back to the original non-streaming call
+      async (streamError) => {
         try {
+          if (!streamError.canFallback || streamedAny) throw streamError;
           const data = await sendMessage(historyPayload, context, token, pageUrl, topic);
-          setMessages((prev) => {
-            const withoutPlaceholder = prev.filter((m) => m.id !== botMsgId);
-            return [
-              ...withoutPlaceholder,
-              {
-                id: botMsgId,
-                role: "assistant",
-                content: data.reply || "Sorry, I didn't get a response. Please try again.",
-                timestamp: new Date().toISOString(),
-                messageId: data.message_id,    // CB-12
-                sessionId: data.session_id,    // CB-12/CB-19
-              },
-            ];
-          });
+          if (!data.reply) throw new Error("The tutor returned an empty answer. Please try again.");
+          setMessages((prev) => [
+            ...prev.filter((m) => m.id !== botMsgId),
+            { id: botMsgId, role: "assistant", content: data.reply, timestamp: new Date().toISOString(),
+              messageId: data.message_id, sessionId: data.session_id },
+          ]);
+          setResponseMode(data.mode || null);
           setSuggestions(data.suggestions || []);
-          if (data.difficulty) setDifficulty(data.difficulty); // CB-18
-          if (data.session_id) setSessionId(data.session_id);  // CB-12/CB-19
-                } catch (err) {
-          const addErrorMessage = (text) => {
-            setMessages((prev) => {
-              const withoutPlaceholder = prev.filter((m) => m.id !== botMsgId);
-              return [
-                ...withoutPlaceholder,
-                { id: botMsgId, role: "assistant", content: text, timestamp: new Date().toISOString() },
-              ];
-            });
-          };
-          if (err.code === 429) {
-            addErrorMessage("⏳ You're sending messages too quickly! Please wait a moment before trying again.");
-          } else {
-            console.error("❌ Chat Error Details:", err);
-            addErrorMessage("⚠️ Sorry, I'm having trouble connecting right now. Please check your internet connection and try again. If this issue persists, contact support.");
-          }
+          if (data.difficulty) setDifficulty(data.difficulty);
+          if (data.session_id) setSessionId(data.session_id);
+        } catch (error) {
+          const message = error.code === 429
+            ? "You have reached the chat limit. Please try again later."
+            : error.message || "The tutor is temporarily unavailable. Please try again.";
+          // Discard partial text so it cannot be mistaken for a complete answer
+          // or included as an assistant turn in the next request's history.
+          setMessages((prev) => [
+            ...prev.filter((m) => m.id !== botMsgId),
+            { id: botMsgId, role: "error", content: message, timestamp: new Date().toISOString() },
+          ]);
           setSuggestions([]);
         } finally {
           setIsLoading(false);
@@ -466,6 +455,10 @@ function ChatWindow({ onClose, onActivity }) {
         )}
         {!user && <span className="cb-guest-note">Guest — history won't be saved</span>}
       </div>
+
+      {responseMode === "mock" && (
+        <div className="cb-demo-notice" role="status">Demo mode — sample replies only</div>
+      )}
 
       {tab === "history" ? (
         <div className="cb-body">

@@ -8,7 +8,8 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount, Route
 from starlette.responses import JSONResponse
 
-from app.routes import chat
+from .routes import chat
+from .frontend import FrontendFiles
 
 # ✅ SECURITY ARCHITECT UPDATE: Define allowed domains explicitly.
 # B-1 FIX: the placeholder "https://your-calculus-website.com" was never
@@ -65,13 +66,19 @@ middleware = [
     )
 ]
 
-# Application
+# Application: bundled deployments serve React from the same public port.
+routes = [
+    Route("/health", health, methods=["GET"]),
+    Mount("/api/chat", routes=chat.routes),
+]
+frontend_build = os.getenv("FRONTEND_BUILD_DIR", "")
+if frontend_build:
+    routes.append(Mount("/", app=FrontendFiles(directory=frontend_build, html=True)))
+else:
+    routes.insert(0, Route("/", homepage, methods=["GET"]))
+
 app = Starlette(
     debug=False,  # ✅ SECURITY ARCHITECT UPDATE: Disabled debug mode to prevent data leaks in production
     middleware=middleware,
-    routes=[
-        Route("/", homepage, methods=["GET"]),
-        Route("/health", health, methods=["GET"]),
-        Mount("/api/chat", routes=chat.routes),
-    ],
-)   
+    routes=routes,
+)

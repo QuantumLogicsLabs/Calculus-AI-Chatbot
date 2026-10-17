@@ -1,5 +1,7 @@
 # routers/chat.py - Complete chat implementation for Starlette
 import asyncio
+import logging
+from contextlib import suppress
 import json
 import re
 import uuid
@@ -12,8 +14,8 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 # from auth_utils import require_user
-from app.auth.auth_utils import require_user
-from app.database.db import (
+from ..auth.auth_utils import require_user
+from ..database.db import (
     fetchone, fetchall, execute, scalar,
     upsert_feedback, get_feedback_for_message,
     get_topic_progress, get_all_topic_progress,
@@ -23,6 +25,29 @@ from app.database.db import (
 # Configuration for aiService
 import os
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8001")
+
+class AIServiceFailure(Exception):
+    def __init__(self, code="ai_unavailable"):
+        self.code = code if code in {"ai_unavailable", "ai_timeout", "ai_incomplete"} else "ai_unavailable"
+        self.detail = ("The tutor took too long to respond. Please try again." if self.code == "ai_timeout"
+                       else "The tutor is temporarily unavailable. Please try again.")
+        self.status = 504 if self.code == "ai_timeout" else 503
+        super().__init__(self.detail)
+
+
+def _upstream_failure(response):
+    try:
+        code = response.json().get("code") or ("ai_timeout" if response.status_code == 504 else "ai_unavailable")
+    except Exception:
+        code = "ai_timeout" if response.status_code == 504 else "ai_unavailable"
+    return AIServiceFailure(code)
+
+
+def _response_metadata(data):
+    # Optional fields keep old clients compatible; never expose upstream errors.
+    return {key: data[key] for key in ("mode", "source", "model")
+            if key in data and (isinstance(data[key], str) or data[key] is None)}
+
 
 # ── T5: SSE Streaming Tunables ────────────────────────────────────────────────
 # FLUSH_INTERVAL bounds how long a token can sit before being sent to the
@@ -56,7 +81,8 @@ class RateLimiter:
 
     def _get_guest_key(self, request: Request) -> str:
         """Generate a unique key for guest users (IP-based or random session)"""
-        forwarded = request.headers.get("x-forwarded-for")
+        forwarded = (None if os.getenv("CALCVOYAGER_PREVIEW", "").lower() == "true"
+                     else request.headers.get("x-forwarded-for"))
         ip = forwarded.split(",")[0].strip() if forwarded else request.client.host if request.client else "unknown"
         return f"guest_{ip}"
 
@@ -264,7 +290,6 @@ async def _persist_turn(
         updated_progress = await record_topic_message(user_id, topic_key)
         difficulty_level = updated_progress.get("difficulty_level", difficulty_level)
     except Exception as e:
-        import logging
         logging.error(f"Failed to update topic progress: {str(e)}")
 
     return {
@@ -547,7 +572,7 @@ async def chat_endpoint(request: Request):
 
     rate_limit_error = await _rate_limiter.check_limit(request, user_id)
     if rate_limit_error:
-        return json_response(rate_limit_error, status_code=429)
+        return json_response(rate_limit_error, 429)
 
     try:
         body = await request.json()
@@ -585,7 +610,6 @@ async def chat_endpoint(request: Request):
             progress = await get_topic_progress(user_id, topic_key)
             difficulty_level = progress.get("difficulty_level", "intermediate")
         except Exception as e:
-            import logging
             logging.error(f"Failed to load topic progress: {str(e)}")
 
         try:
@@ -599,7 +623,6 @@ async def chat_endpoint(request: Request):
             if active_session and active_session.get("summary"):
                 session_summary = active_session["summary"]
         except Exception as e:
-            import logging
             logging.warning(f"Failed to load session summary: {str(e)}")
 
     # Call the aiService chatbot
@@ -615,11 +638,17 @@ async def chat_endpoint(request: Request):
                     "summary": session_summary  # CB-13: pass session summary
                 }
             )
-            ai_response.raise_for_status()
+            if ai_response.is_error:
+                raise _upstream_failure(ai_response)
             ai_data = ai_response.json()
 
             reply       = ai_data.get('answer', '')
             suggestions = ai_data.get('suggestions', [])
+            if not isinstance(reply, str) or not reply.strip():
+                raise AIServiceFailure("ai_incomplete")
+            response_meta = _response_metadata(ai_data)
+            logging.info("CHAT_RESPONSE: source=%s mode=%s stream=False",
+                         response_meta.get("source", "unknown"), response_meta.get("mode", "unknown"))
             assistant_message_id = None
 
             # If user is authenticated, save to database and handle summarization
@@ -703,10 +732,8 @@ async def chat_endpoint(request: Request):
                                             (new_summary, count, session_id)
                                         )
                                     except Exception as e:
-                                        import logging
                                         logging.warning(f"Failed to summarize session {session_id}: {str(e)}")
                     except Exception as e:
-                        import logging
                         logging.warning(f"Failed to check summarization trigger: {str(e)}")
 
                     # CB-18: log this turn against the topic's adaptive-difficulty tracker
@@ -714,28 +741,20 @@ async def chat_endpoint(request: Request):
                         updated_progress = await record_topic_message(user_id, topic_key)
                         difficulty_level = updated_progress.get("difficulty_level", difficulty_level)
                     except Exception as e:
-                        import logging
                         logging.error(f"Failed to update topic progress: {str(e)}")
                 except Exception as e:
                     # Log error but don't fail the request - user still gets their answer
-                    import logging
                     logging.error(f"Failed to save chat to DB: {str(e)}")
 
+    except AIServiceFailure as exc:
+        return json_response({"detail": exc.detail, "code": exc.code}, exc.status)
     except httpx.TimeoutException:
-        return json_response(
-            {"detail": "AI service timeout - please try again"},
-            504
-        )
-    except httpx.HTTPError as e:
-        return json_response(
-            {"detail": f"AI service error: {str(e)}"},
-            502
-        )
-    except Exception as e:
-        return json_response(
-            {"detail": f"Failed to reach AI service: {str(e)}"},
-            500
-        )
+        failure = AIServiceFailure("ai_timeout")
+        return json_response({"detail": failure.detail, "code": failure.code}, failure.status)
+    except Exception as exc:
+        logging.warning("AI_UPSTREAM_FAILED: type=%s", type(exc).__name__)
+        failure = AIServiceFailure()
+        return json_response({"detail": failure.detail, "code": failure.code}, failure.status)
 
     # FIX: include message_id and session_id in response so frontend can submit CB-12 feedback
     return json_response({
@@ -743,7 +762,8 @@ async def chat_endpoint(request: Request):
         "suggestions": suggestions,
         "message_id":  assistant_message_id,  # None for guests; frontend should handle both
         "session_id":  session_id if user_id and 'session_id' in locals() else None,  # For CB-19 export
-        "difficulty":  difficulty_level        # CB-18
+        "difficulty":  difficulty_level,       # CB-18
+        **response_meta,
     })
 
 
@@ -780,7 +800,7 @@ async def chat_stream_endpoint(request: Request):
 
     rate_limit_error = await _rate_limiter.check_limit(request, user_id)
     if rate_limit_error:
-        return json_response(rate_limit_error, status_code=429)
+        return json_response(rate_limit_error, 429)
 
     try:
         body = await request.json()
@@ -810,7 +830,6 @@ async def chat_stream_endpoint(request: Request):
             progress = await get_topic_progress(user_id, topic_key)
             difficulty_level = progress.get("difficulty_level", "intermediate")
         except Exception as e:
-            import logging
             logging.error(f"Failed to load topic progress: {str(e)}")
         try:
             active_session = await fetchone(
@@ -822,59 +841,71 @@ async def chat_stream_endpoint(request: Request):
             if active_session and active_session.get("summary"):
                 session_summary = active_session["summary"]
         except Exception as e:
-            import logging
             logging.warning(f"Failed to load session summary: {str(e)}")
 
     async def event_generator() -> AsyncGenerator[str, None]:
         queue: asyncio.Queue = asyncio.Queue(maxsize=STREAM_QUEUE_MAX)
         full_reply_parts: list = []
         suggestions: list = []
-        upstream_error: Optional[str] = None
+        upstream_error = None
+        response_meta = {}
 
         async def producer():
-            nonlocal upstream_error
+            nonlocal upstream_error, response_meta
             try:
-                async with httpx.AsyncClient(timeout=None) as client:
-                    async with client.stream(
-                        "POST",
-                        f"{AI_SERVICE_URL}/chat/stream",
-                        json={
-                            "message": user_message,
-                            "topic": context or "",
-                            "difficulty": difficulty_level,
-                            "history": messages[:-1] if len(messages) > 1 else [],
-                            "summary": session_summary,
-                        },
-                    ) as resp:
-                        resp.raise_for_status()
-                        async for line in resp.aiter_lines():
-                            if not line or not line.startswith("data:"):
-                                continue
-                            raw = line[len("data:"):].strip()
-                            if not raw:
-                                continue
-                            try:
-                                data = json.loads(raw)
-                            except Exception:
-                                continue
-                            # Tolerant of a few likely key names from aiService
-                            token = (
-                                data.get("delta")
-                                or data.get("token")
-                                or data.get("text")
-                                or ""
-                            )
-                            if data.get("suggestions"):
-                                suggestions.extend(data["suggestions"])
-                            if token:
-                                full_reply_parts.append(token)
-                                await queue.put(token)
-            except httpx.HTTPError as e:
-                upstream_error = f"AI service error: {str(e)}"
-            except Exception as e:
-                upstream_error = f"Failed to reach AI service: {str(e)}"
+                async with asyncio.timeout(42):
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(42, connect=5)) as client:
+                        async with client.stream(
+                            "POST", f"{AI_SERVICE_URL}/chat/stream",
+                            json={"message": user_message, "topic": context or "",
+                                  "difficulty": difficulty_level, "history": messages[:-1],
+                                  "summary": session_summary},
+                        ) as resp:
+                            if resp.is_error:
+                                await resp.aread()
+                                raise _upstream_failure(resp)
+                            completed = False
+                            async for line in resp.aiter_lines():
+                                if not line.startswith("data:"):
+                                    continue
+                                raw = line[5:].strip()
+                                if not raw:
+                                    continue
+                                if raw == "[DONE]":
+                                    completed = True
+                                    break
+                                try:
+                                    data = json.loads(raw)
+                                except ValueError:
+                                    raise AIServiceFailure("ai_incomplete") from None
+                                if not isinstance(data, dict):
+                                    raise AIServiceFailure("ai_incomplete")
+                                if data.get("error"):
+                                    raise AIServiceFailure(data.get("code"))
+                                token = data.get("delta") or data.get("token") or data.get("text") or ""
+                                if not isinstance(token, str):
+                                    raise AIServiceFailure("ai_incomplete")
+                                if token:
+                                    full_reply_parts.append(token)
+                                    await queue.put(token)
+                                if isinstance(data.get("suggestions"), list):
+                                    suggestions.extend(data["suggestions"])
+                                if data.get("done"):
+                                    response_meta = _response_metadata(data)
+                                    completed = True
+                                    break
+                            if not completed or not "".join(full_reply_parts).strip():
+                                raise AIServiceFailure("ai_incomplete")
+            except AIServiceFailure as exc:
+                upstream_error = exc
+            except (TimeoutError, httpx.TimeoutException):
+                upstream_error = AIServiceFailure("ai_timeout")
+            except Exception as exc:
+                logging.warning("AI_UPSTREAM_FAILED: type=%s stream=True", type(exc).__name__)
+                upstream_error = AIServiceFailure()
             finally:
-                await queue.put(None)
+                if not asyncio.current_task().cancelling():
+                    await queue.put(None)
 
         producer_task = asyncio.create_task(producer())
 
@@ -908,11 +939,13 @@ async def chat_stream_endpoint(request: Request):
                     yield ": heartbeat\n\n"
 
             if upstream_error:
-                yield sse_format(json.dumps({"error": upstream_error}), event="error")
+                yield sse_format(json.dumps({"error": upstream_error.detail, "code": upstream_error.code}), event="error")
                 return
 
             reply = "".join(full_reply_parts)
-            result = {"suggestions": suggestions, "difficulty": difficulty_level}
+            result = {"suggestions": suggestions, "difficulty": difficulty_level, **response_meta}
+            logging.info("CHAT_RESPONSE: source=%s mode=%s stream=True",
+                         response_meta.get("source", "unknown"), response_meta.get("mode", "unknown"))
 
             if user_id and reply:
                 try:
@@ -921,7 +954,6 @@ async def chat_stream_endpoint(request: Request):
                     )
                     result.update(persisted)
                 except Exception as e:
-                    import logging
                     logging.error(f"Failed to save streamed chat to DB: {str(e)}")
 
             yield sse_format(json.dumps({"done": True, **result}), event="done")
@@ -929,6 +961,8 @@ async def chat_stream_endpoint(request: Request):
         finally:
             if not producer_task.done():
                 producer_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await producer_task
 
     return StreamingResponse(
         event_generator(),
@@ -1031,7 +1065,6 @@ async def submit_feedback(request: Request):
             msg_topic = json.loads(message["metadata"]).get("topic", "general")
         await record_topic_feedback(user_id, msg_topic, feedback)
     except Exception as e:
-        import logging
         logging.error(f"Failed to update topic progress from feedback: {str(e)}")
 
     return json_response({

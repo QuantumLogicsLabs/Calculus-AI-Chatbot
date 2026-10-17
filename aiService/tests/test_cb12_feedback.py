@@ -1,203 +1,61 @@
-"""
-CB-12 · Feedback Endpoint Test Suite
-─────────────────────────────────────────────────────────────────────────────
-Tests POST /api/chat/feedback against all acceptance criteria.
+"""Exercise the real backend feedback route and SQLite helpers in isolation.
 
-HOW IT WORKS — nothing in the existing project is touched:
-  - A minimal Starlette app is built here just for testing.
-  - An isolated in-memory SQLite DB is created fresh for each test.
-  - require_user is monkeypatched to simulate auth / guest states.
-  - The real submit_feedback, upsert_feedback, and get_feedback_for_message
-    functions from your actual files are imported and exercised.
-
-PLACE THIS FILE AT:
-  tests/test_cb12_feedback.py   (alongside chatbot_tests.py)
-
-RUN WITH:
-  pytest tests/test_cb12_feedback.py -v
-─────────────────────────────────────────────────────────────────────────────
+Authentication is patched per test; these tests do not certify the placeholder
+Bearer-token authentication. Each test gets a temporary on-disk SQLite database
+because the production helpers open a new connection for every query.
 """
 
-import json
 import sqlite3
-import sys
-import os
+from contextlib import ExitStack
+
 import pytest
-
-# ── Path setup ────────────────────────────────────────────────────────────────
-# Allows imports to resolve the same way the rest of the project does.
-# Adjust if your project root is structured differently.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from starlette.applications import Starlette
-from starlette.routing import Route
 from starlette.testclient import TestClient
-from starlette.requests import Request
 
-# ── Imports from your actual code ─────────────────────────────────────────────
-import db as db_module
-import chat as chat_module
-from chat import submit_feedback, json_response
+from backend.app.main import app
+from backend.app.routes import chat as chat_module
+from backend.app.database import db as db_module
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TEST DATABASE SETUP
-# Each test gets a completely fresh in-memory SQLite database so tests
-# never interfere with each other or with the real calcvoyager.db.
-# ═════════════════════════════════════════════════════════════════════════════
-
-IN_MEMORY_DB = ":memory:"
-
-# We keep one shared connection open for the duration of the test session
-# because :memory: databases are destroyed when the last connection closes.
-_test_conn: sqlite3.Connection = None
+USER_ID = 1
+SESSION_ID = "test-session-uuid"
+_test_conn = None
+_clients = None
 
 
 def _get_test_connection():
-    """Return the shared test connection (mimics db_module.get_connection)."""
-    global _test_conn
-    if _test_conn is None:
-        _test_conn = sqlite3.connect(IN_MEMORY_DB, check_same_thread=False)
-        _test_conn.row_factory = sqlite3.Row
-        _test_conn.execute("PRAGMA foreign_keys = ON")
     return _test_conn
 
 
-def _reset_db():
-    """Drop and recreate all tables — called before each test."""
+def _seed_db(user_id=USER_ID, session_id=SESSION_ID):
     conn = _get_test_connection()
-    conn.executescript("""
-        DROP TABLE IF EXISTS message_feedback;
-        DROP TABLE IF EXISTS chat_messages;
-        DROP TABLE IF EXISTS chat_sessions;
-        DROP TABLE IF EXISTS users;
-    """)
-    # Minimal users table so FK references resolve
-    conn.executescript("""
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL
-        );
-    """ + db_module.CHAT_SCHEMA_SQL)
-    conn.commit()
-
-
-def _seed_db(user_id: int = 1, session_id: str = "test-session-uuid"):
-    """
-    Insert the minimum rows needed for feedback tests:
-      - one user
-      - one active session
-      - one assistant message (this is what gets liked/disliked)
-    Returns the message_id of the seeded assistant message.
-    """
-    conn = _get_test_connection()
-    conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)", (user_id, "testuser"))
     conn.execute(
         "INSERT INTO chat_sessions (user_id, session_id, title) VALUES (?, ?, ?)",
-        (user_id, session_id, "Test Session")
+        (user_id, session_id, "Test Session"),
     )
     cursor = conn.execute(
         "INSERT INTO chat_messages (user_id, session_id, message_type, content) "
         "VALUES (?, ?, 'assistant', 'Here is your calculus answer.')",
-        (user_id, session_id)
+        (user_id, session_id),
     )
     conn.commit()
     return cursor.lastrowid
 
 
-# ── Patch db_module helpers to use the test connection ────────────────────────
-# We replace get_connection in db_module so every helper (execute, fetchone,
-# upsert_feedback, etc.) transparently uses the in-memory DB.
-
-async def _patched_execute(query: str, params: tuple = ()):
-    conn = _get_test_connection()
-    cursor = conn.execute(query, params)
-    conn.commit()
-    return cursor.lastrowid
-
-async def _patched_fetchone(query: str, params: tuple = ()):
-    conn = _get_test_connection()
-    cursor = conn.execute(query, params)
-    row = cursor.fetchone()
-    return dict(row) if row else None
-
-async def _patched_fetchall(query: str, params: tuple = ()):
-    conn = _get_test_connection()
-    cursor = conn.execute(query, params)
-    return [dict(r) for r in cursor.fetchall()]
-
-async def _patched_scalar(query: str, params: tuple = ()):
-    conn = _get_test_connection()
-    cursor = conn.execute(query, params)
-    row = cursor.fetchone()
-    return row[0] if row else None
-
-# Apply patches
-db_module.execute  = _patched_execute
-db_module.fetchone = _patched_fetchone
-db_module.fetchall = _patched_fetchall
-db_module.scalar   = _patched_scalar
-
-# Patch the same names inside chat_module (it imported them at load time)
-chat_module.execute  = _patched_execute
-chat_module.fetchone = _patched_fetchone
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# AUTH HELPERS
-# require_user normally reads a JWT from the request. We replace it per-test
-# to simulate authenticated users and guests without any real tokens.
-# ═════════════════════════════════════════════════════════════════════════════
-
-def _make_auth(user_id):
-    """Return a require_user that always authenticates as user_id."""
-    def _auth(request: Request):
-        return user_id
-    return _auth
-
-def _guest_auth(request: Request):
-    """Simulates a guest — require_user returns None."""
-    return None
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# MINIMAL TEST APP
-# Only the feedback route is mounted — no other endpoints needed.
-# ═════════════════════════════════════════════════════════════════════════════
-
 def _make_app(user_id=None):
-    """
-    Build a fresh TestClient app.
-    Pass user_id=None to simulate a guest.
-    """
-    if user_id is not None:
-        chat_module.require_user = _make_auth(user_id)
-    else:
-        chat_module.require_user = _guest_auth
+    chat_module.require_user = lambda request: user_id
+    return _clients.enter_context(TestClient(app))
 
-    app = Starlette(routes=[
-        Route("/api/chat/feedback", submit_feedback, methods=["POST"]),
-    ])
-    return TestClient(app, raise_server_exceptions=True)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# FIXTURES
-# ═════════════════════════════════════════════════════════════════════════════
-
-USER_ID    = 1
-SESSION_ID = "test-session-uuid"
 
 @pytest.fixture(autouse=True)
-def fresh_db():
-    """Reset and seed the database before every test."""
-    _reset_db()
-    yield
+def fresh_db(isolated_db, monkeypatch):
+    global _test_conn, _clients
+    # Register the original auth function for restoration after direct per-test overrides.
+    monkeypatch.setattr(chat_module, "require_user", chat_module.require_user)
+    with sqlite3.connect(db_module.DB_PATH) as conn, ExitStack() as clients:
+        conn.row_factory = sqlite3.Row
+        _test_conn, _clients = conn, clients
+        yield
+    _test_conn = _clients = None
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TESTS
-# ═════════════════════════════════════════════════════════════════════════════
 
 class TestFeedbackSuccess:
     """Happy-path cases — valid votes from authenticated users."""
@@ -405,11 +263,6 @@ class TestOwnership:
         Should return 404 — message not found in their session.
         """
         message_id = _seed_db(user_id=1, session_id=SESSION_ID)
-
-        # Seed a second user so FK is valid
-        conn = _get_test_connection()
-        conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (2, 'otheruser')")
-        conn.commit()
 
         client = _make_app(user_id=2)  # different user
 

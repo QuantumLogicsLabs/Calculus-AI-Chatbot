@@ -1,228 +1,96 @@
-# CalcVoyager Test Suite - Quick Start Guide
+# CalcVoyager tests
 
-## Running the Tests
+Run all commands from the repository root after installing both Python requirements files.
+Use `.venv/bin/python` on Linux/macOS instead of the Windows path below.
 
-# 1. Set USE_MOCK = False in llm_client.py
-# 2. Make sure GROK_API_KEY is set in aiService/services/.env
-# 3. From the project root:
+## Offline CI checks (no API key)
 
-python -m aiService.tests.chatbot_tests
-### 1. Prerequisites
-
-Before running tests, ensure:
-
-```bash
-# 1. Install dependencies
-pip install -r aiService/requirements.txt
-
-# 2. Configure environment
-# Edit aiService/services/.env and add:
-GROK_API_KEY=xai-your-actual-key-here
-
-# 3. Enable real API testing
-# Edit aiService/services/llm_client.py line 12:
-USE_MOCK = False  # Change from True to False
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q --junitxml=test-results/mock.xml
 ```
 
-### 2. Execute All Tests
+`conftest.py` forces mock mode before imports, clears the Groq key in the test
+process, rejects real provider paths, and resets the cache per test. Database
+checks use temporary SQLite files and real production database helpers; they do
+not replace those helpers with fake SQL implementations. Authentication identity
+is patched where user isolation is under test. These tests do not validate the
+placeholder token authentication or claim real-model mathematical accuracy.
 
-From the project root directory:
+Coverage includes:
 
-```bash
-python -m aiService.tests.chatbot_tests
+- Real backend feedback route: valid votes, persisted rows, upserts, bad input,
+  guests, wrong users, wrong sessions and nonexistent messages.
+- Backend-to-AI HTTP contracts via ASGI transports: JSON, SSE completion, supplied
+  history, persisted turns, history retrieval, exports, validation and rate limits.
+- Conversation history, page topic, difficulty and summary reaching the actual
+  prompt builder through the AI route, using a recording model stub.
+- Existing cache regressions, with explicit assertions on their returned results.
+- Mock streaming latency, missing/late token failures and nonzero latency gates.
+- Evaluation validators and exit codes. A subprocess test proves that placeholder
+  replies make the real quality-evaluation CLI exit 1 instead of silently passing.
+
+`pytest.ini` discovers the offline suites in `tests` and `aiService/tests`.
+`chatbot_tests.py` is an explicit real-evaluation module, not a pytest test file.
+The root `test_stream.py` is an import-safe manual live-server probe.
+
+## Real Groq evaluation (optional; consumes API credits)
+
+Use your ignored `aiService/services/.env` file for `GROQ_API_KEY` and set
+`USE_MOCK=False`. Do not edit the Python source to switch providers or modes.
+Existing shell environment variables take priority over `.env` values.
+
+```powershell
+$env:USE_MOCK = "False"
+.\.venv\Scripts\python.exe -m aiService.tests.chatbot_tests
+.\.venv\Scripts\python.exe -m aiService.tests.test_streaming_latency
 ```
 
-This will run all three test objectives:
-- **CB-2**: System prompt validation (20 calculus questions)
-- **CB-8**: Scope enforcement (10 off-topic questions)
-- **CB-9**: Response quality evaluation (answer key matching)
+The client calls Groq, not xAI/Grok. `GROK_API_KEY` does not configure this client.
+The model defaults to `openai/gpt-oss-120b` and can be set with `GROQ_MODEL`.
+Real-provider errors raise safe errors; they never fall back to mock replies.
+Offline provider tests use stubs to cover failures, empty/truncated streams,
+timeouts, circuit recovery, cancellation, cache isolation and error redaction.
 
-### 3. Expected Output
+The response-quality module checks its existing thresholds: CB-2 at least 18/20
+formatting/length passes, CB-8 10/10 refusals, CB-9 at least 16 answer-key matches
+at score >= 0.6, and the follow-up-cache regressions. A confirmed incorrect boxed
+answer fails that question through independent SymPy verification. Answer-key
+matching is an automated heuristic, not proof of mathematical correctness.
+The latency module requires a nonempty first token within 2 seconds for every
+sample. Failed gates exit nonzero. Mock answers are expected to fail real quality
+acceptance; offline CI tests the application contracts separately.
 
-```
-╔══════════════════════════════════════════════════════════╗
-║          CalcVoyager Test Suite Execution               ║
-║            CB-2, CB-8, CB-9 Combined                    ║
-╚══════════════════════════════════════════════════════════╝
+Fresh reports go to `test-results/` (ignored), or the directory selected with
+`CALCVOYAGER_TEST_RESULTS_DIR`. CI never reads the old tracked result snapshots
+in `aiService/tests/test_results.json` or `scope_results.json` as pass evidence.
 
-============================================================
-CB-2: CalcVoyager Acceptance Test
-Testing system prompt against 20 calculus questions
-============================================================
+## GitHub Actions
 
-[1/20] Testing: limits - Q1
-  Question: What is the limit of (x² - 4)/(x - 2) as x approaches 2?...
-  ✓ PASS - 145 words
-  Correctness: 1.00
+- Push/PR offline jobs test Python 3.11 and 3.12 with no secrets.
+- A separate job installs the frontend lockfile, runs service/UI/rendering tests,
+  and builds with `CI=true`. CRA's Jest resolver uses explicit CommonJS mappings
+  for the locked React Router package.
+- The nightly or explicitly selected real evaluation requires the team-owned
+  `GROQ_API_KEY` repository secret; missing credentials fail clearly.
+- Test/evaluation commands do not suppress failures. JUnit reports are uploaded
+  even when offline tests fail.
+- Existing SnapDeploy deployment is manual-only: on `main`, explicitly select
+  `deploy_backend` in Run workflow. Offline tests and frontend build must pass,
+  and SnapDeploy secrets must be configured. Ordinary pushes do not redeploy it.
 
-[... 19 more questions ...]
+No real API calls, remote CI runs, or hosting changes are needed for local offline
+verification. The runtime dependency deprecation warnings are reported separately
+from test failures.
 
-============================================================
-CB-2 RESULTS: 18/20 tests passed
-============================================================
+## Two-question live smoke check
 
-Check Breakdown:
-  latex_formatting: 20/20
-  follow_ups: 19/20
-  word_count: 20/20
-  step_formatting: 18/20
-
-============================================================
-CB-9: Response Quality Evaluation
-============================================================
-
-Correctness Scores (answer key matching):
-  Q 1: ✓ 1.00
-  Q 2: ✓ 0.67
-  [... more scores ...]
-
-Overall Correctness: 16/20 questions with score >= 0.6
-
-✓ CB-9 ACCEPTANCE: MET
-  Response quality meets accuracy threshold
-
-============================================================
-CB-8: Scope Enforcement Test
-Testing Cal's refusal of off-topic questions
-============================================================
-
-[1/10] Testing: Who was the first president of the United St...
-  ✓ REFUSED - Refusal phrase 'I'm Cal' detected
-
-[... 9 more questions ...]
-
-============================================================
-SCOPE ENFORCEMENT: 10/10 refused correctly
-============================================================
-
-✓ CB-8 ACCEPTANCE: MET
-  Cal successfully refuses all off-topic questions
-
-============================================================
-COMBINED TEST SUMMARY
-============================================================
-CB-2 (System Prompt):      ✓ PASS
-CB-8 (Scope Enforcement):  ✓ PASS
-CB-9 (Quality Evaluation): ✓ PASS
-============================================================
-
-🎉 ALL ACCEPTANCE CRITERIA MET
+```powershell
+.\.venv\Scripts\python.exe -m scripts.verify_live_chat --backend-url http://127.0.0.1:8002
 ```
 
-## Test Results
-
-Results are automatically saved to:
-```
-aiService/tests/test_results.json
-```
-
-This JSON file contains detailed information including:
-- Individual question responses (preview)
-- Check results for each question
-- Correctness scores
-- Word counts
-- Pass/fail status
-- Overall statistics
-
-## Interpreting Results
-
-### CB-2: System Prompt Validation
-- **Pass threshold**: 18/20 questions (90%)
-- **What it tests**: LaTeX formatting, follow-ups, word count, step formatting
-- **Why it matters**: Ensures Cal follows the system prompt structure
-
-### CB-8: Scope Enforcement
-- **Pass threshold**: 10/10 off-topic questions refused (100%)
-- **What it tests**: Cal's ability to refuse non-calculus questions
-- **Detection criteria**:
-  - Response contains "I'm Cal, your calculus tutor"
-  - Response does NOT contain step-by-step math solutions
-
-### CB-9: Response Quality Evaluation
-- **Pass threshold**: 16/20 questions with correctness >= 0.6 (80%)
-- **What it tests**: Mathematical accuracy via answer key matching
-- **Scoring method**: Fraction of expected LaTeX fragments found
-- **Example**: If answer_key = ["x + 2", "4", "$\\lim$"] and response contains 2/3, score = 0.67
-
-## Troubleshooting
-
-### Mock Mode Still Active
-**Symptom**: Tests run instantly with placeholder responses
-
-**Solution**:
-```python
-# In aiService/services/llm_client.py line 12:
-USE_MOCK = False  # Make sure this is False, not True
-```
-
-### API Key Error
-**Symptom**: "Authentication failed" or similar errors
-
-**Solution**:
-1. Check `.env` file location: `aiService/services/.env`
-2. Verify GROK_API_KEY is set correctly
-3. Ensure no extra spaces or quotes around the key
-
-### Import Errors
-**Symptom**: `ModuleNotFoundError: No module named 'openai'`
-
-**Solution**:
-```bash
-pip install -r aiService/requirements.txt
-```
-
-### Path Issues on Windows
-**Symptom**: File not found errors
-
-**Solution**: Run from project root directory:
-```bash
-cd "c:\Users\zaigh\Desktop\Qunatum Logics\Calculus\chatbot\Calculus-AI-Chatbot"
-python -m aiService.tests.chatbot_tests
-```
-
-## Cost Considerations
-
-- **Total API calls**: 30 (20 calculus + 10 off-topic)
-- **Model**: grok-3-mini
-- **Max tokens per call**: 1000
-- **Estimated cost**: Check xAI pricing for current rates
-
-To minimize costs during development:
-- Use `USE_MOCK = True` for code testing
-- Only set `USE_MOCK = False` for final validation
-
-## Monitoring Scope Violations
-
-During test execution, watch for WARNING logs:
-```
-WARNING:root:SCOPE_VIOLATION: possible off-topic response for message: Tell me about...
-```
-
-These warnings indicate Cal may have answered an off-topic question instead of refusing it. This helps identify system prompt weaknesses.
-
-## Next Steps After Testing
-
-1. **If tests fail**:
-   - Review `test_results.json` for detailed failure reasons
-   - Check which questions failed and why
-   - Consider refining the system prompt in `llm_client.py`
-   - Adjust answer keys if they're too strict
-
-2. **If tests pass**:
-   - Review scope violation warnings (if any)
-   - Consider adding more edge case questions
-   - Document any observed issues for future improvements
-   - Proceed with integration testing
-
-## Additional Test Files
-
-- **calculus_questions.json**: Contains 20 test questions with answer keys
-- **chatbot_tests.py**: Main test suite implementation
-- **test_results.json**: Generated output (git-ignored)
-
-## Support
-
-For questions about:
-- Test implementation: See IMPLEMENTATION_SUMMARY.md
-- System prompt design: See aiService/readme.md
-- API configuration: See aiService/services/.env (create if missing)
+Run against your restarted, real-mode local backend. This requires two distinct,
+fresh primary-provider answers and independent boxed math verification. The
+ignored `test-results/live-smoke.json` report retains returned answers and parser
+diagnostics even if verification fails. An unsupported notation is unverified,
+not automatically an incorrect mathematical answer. This does not certify the
+entire model or the inaccessible production deployment.

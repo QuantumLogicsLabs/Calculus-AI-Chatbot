@@ -1,3 +1,4 @@
+import os
 from starlette.requests import Request
 
 def require_user(request: Request):
@@ -9,6 +10,8 @@ def require_user(request: Request):
     For now: returns a hardcoded user_id for testing.
     Replace with real JWT decode when auth system is ready.
     """
+    if os.getenv("CALCVOYAGER_PREVIEW", "").lower() == "true":
+        return None
     auth_header = request.headers.get("Authorization", "")
     
     if auth_header.startswith("Bearer "):

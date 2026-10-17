@@ -8,6 +8,7 @@ Run with: python -m aiService.tests.test_streaming_latency
 
 import asyncio
 import time
+import pytest
 
 from aiService.services.llm_client import ask_llm_stream
 
@@ -33,6 +34,8 @@ async def measure_first_token(message: str, topic: str = "", history: list = Non
     full_text = ""
 
     async for token in ask_llm_stream(message=message, topic=topic, history=history):
+        if not token:
+            continue
         chunk_count += 1
         if first_token_time is None:
             first_token_time = time.perf_counter() - start
@@ -42,7 +45,7 @@ async def measure_first_token(message: str, topic: str = "", history: list = Non
 
     return {
         "message": message,
-        "first_token_seconds": round(first_token_time, 3) if first_token_time else None,
+        "first_token_seconds": round(first_token_time, 3) if first_token_time is not None else None,
         "total_seconds": round(total_time, 3),
         "chunk_count": chunk_count,
         "response_length_chars": len(full_text),
@@ -72,5 +75,24 @@ async def run_latency_suite():
     return results
 
 
+def latency_exit_code(results):
+    return 0 if results and all(result["passed"] for result in results) else 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", TEST_MESSAGES)
+async def test_mock_first_token_latency(case):
+    result = await measure_first_token(**case)
+    assert result["passed"], result
+    assert result["chunk_count"] > 1
+    assert result["response_length_chars"] > 0
+
+
+def test_latency_gate_rejects_failure_and_empty_results():
+    assert latency_exit_code([{"passed": True}]) == 0
+    assert latency_exit_code([{"passed": True}, {"passed": False}]) == 1
+    assert latency_exit_code([]) == 1
+
+
 if __name__ == "__main__":
-    asyncio.run(run_latency_suite())
+    raise SystemExit(latency_exit_code(asyncio.run(run_latency_suite())))
