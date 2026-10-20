@@ -75,6 +75,31 @@ def _extract_integral_bounds(question_lower: str):
     return None
 
 
+def _strip_differential(expr: str) -> str:
+    """Remove a trailing differential term such as 'dx', 'd x', 'dθ',
+    or 'as x → …' / 'as x -> …' from an extracted expression string.
+
+    Also removes trailing integral-bounds phrases of the form
+    'from N to M' or 'between N and M' that appear after the differential
+    (e.g. 'x^2 dx from 0 to 1' → 'x^2').
+
+    These suffixes are part of the mathematical notation used in
+    questions but are not part of the SymPy expression to be evaluated.
+    Only trailing tokens are removed so interior content is preserved.
+    """
+    # Strip trailing 'as <var> → …', 'as <var> approaches …', etc.
+    expr = re.sub(r'\s+as\s+\w.+$', '', expr, flags=re.IGNORECASE)
+    # Strip trailing bounds phrase 'from N to M' or 'between N and M'.
+    expr = re.sub(
+        r'\s+(?:from|between)\s+-?\d+(?:\.\d+)?\s+(?:to|and)\s+-?\d+(?:\.\d+)?$',
+        '', expr, flags=re.IGNORECASE,
+    )
+    # Strip trailing differential: 'd<var>' or 'd <var>' (single letter or Greek).
+    expr = re.sub(r'\s+d\s*[a-z]\w*$', '', expr, flags=re.IGNORECASE)
+    return expr.strip()
+
+
+
 def parse_operation(question: str) -> Tuple[str, str, Optional[str]]:
     """Detect the math operation and extract the expression.
 
@@ -113,7 +138,7 @@ def parse_operation(question: str) -> Tuple[str, str, Optional[str]]:
 
     if 'integral' in question_lower or 'integrate' in question_lower:
         match = re.search(r'(?:integral|integrate)\s+(?:of\s+)?([^.?]+)', question_lower)
-        expr = match.group(1).strip() if match else 'x**2'
+        expr = _strip_differential(match.group(1).strip() if match else 'x**2')
         bounds = _extract_integral_bounds(question_lower)
         if bounds:
             return 'definite_integral', expr, f"{bounds[0]},{bounds[1]}"
@@ -121,7 +146,7 @@ def parse_operation(question: str) -> Tuple[str, str, Optional[str]]:
 
     if 'limit' in question_lower:
         match = re.search(r'limit\s+(?:of\s+)?([^.?]+)', question_lower)
-        expr = match.group(1).strip() if match else '1/x'
+        expr = _strip_differential(match.group(1).strip() if match else '1/x')
         point = _extract_limit_point(question_lower)
         return 'limit', expr, point
 
