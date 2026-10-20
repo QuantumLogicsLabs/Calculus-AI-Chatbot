@@ -32,12 +32,25 @@ def preprocess_math_expr(expr: str) -> str:
 
 
 def extract_boxed_answer(cal_response: str) -> Optional[str]:
-    """Extract the content inside \\boxed{...}. Handles one level of
-    nested braces (e.g. \\boxed{\\frac{1}{2}})."""
+    """Extract and normalize the content inside \\boxed{...}. Handles one level of
+    nested braces (e.g. \\boxed{\\frac{1}{2}}), strips equation prefixes (e.g.
+    'y = ', 'f'(x) = ', 'dy/dx = '), inner math delimiters, and trailing punctuation."""
     match = re.search(r'\\boxed\{((?:[^{}]|\{[^{}]*\})*)\}', cal_response)
-    if match:
-        return match.group(1).strip()
-    return None
+    if not match:
+        return None
+    ans = match.group(1).strip()
+    # Strip inner math delimiters like $...$ or $$...$$
+    if ans.startswith('$') and ans.endswith('$'):
+        ans = ans.strip('$').strip()
+    # Strip trailing punctuation (. or , or ;)
+    ans = ans.rstrip('.,;').strip()
+    # Strip equation LHS prefix (e.g. 'y = ', 'f\'(x) = ', 'f(x) = ', 'dy/dx = ', '\frac{dy}{dx} = ')
+    ans = re.sub(
+        r'^(?:[a-zA-Z][a-zA-Z0-9_\'\^\\]*(?:\([^)]*\))?|\\?frac\{d[a-zA-Z]\}\{d[a-zA-Z]\}|d[a-zA-Z]/d[a-zA-Z])\s*=\s*',
+        '',
+        ans,
+    )
+    return ans.strip()
 
 
 def detect_variables_in_question(question: str) -> list:

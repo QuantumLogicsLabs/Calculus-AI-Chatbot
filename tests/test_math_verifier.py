@@ -1,6 +1,11 @@
 import pytest
 
-from aiService.services.math_verifier import verify_cal_math, _strip_differential, parse_operation
+from aiService.services.math_verifier import (
+    verify_cal_math,
+    _strip_differential,
+    parse_operation,
+    extract_boxed_answer,
+)
 
 
 @pytest.mark.parametrize("boxed,verdict", [
@@ -64,6 +69,46 @@ def test_parse_operation_strips_trailing_differentials(question, expected_operat
 def test_integral_questions_now_verifiable(question, boxed, verdict):
     """Integral questions with trailing 'dx' in the phrasing must now
     return a definite verdict instead of a parse error."""
+    correct, sympy_result, diagnostic = verify_cal_math(question, boxed)
+    assert correct is verdict, (
+        f"Expected verdict={verdict!r} but got correct={correct!r}. "
+        f"sympy_result={sympy_result!r}, diagnostic={diagnostic!r}"
+    )
+
+
+@pytest.mark.parametrize("raw_response,expected_extracted", [
+    # Plain boxed answer
+    (r"\boxed{2*x}", "2*x"),
+    # Equation with variable assignment (y = ...)
+    (r"\boxed{y = 2*x}", "2*x"),
+    # Function notation (f'(x) = ...)
+    (r"\boxed{f'(x) = 2*x}", "2*x"),
+    (r"\boxed{f(x) = 2*x}", "2*x"),
+    # Leibniz derivative notation (\frac{dy}{dx} = ...)
+    (r"\boxed{\frac{dy}{dx} = 2*x}", "2*x"),
+    (r"\boxed{dy/dx = 2*x}", "2*x"),
+    # Trailing punctuation inside the box
+    (r"\boxed{2*x.}", "2*x"),
+    (r"\boxed{2*x,}", "2*x"),
+    # Math delimiters inside the box ($...$)
+    (r"\boxed{$2*x$}", "2*x"),
+])
+def test_extract_boxed_answer_normalizes_equations_and_delimiters(raw_response, expected_extracted):
+    """extract_boxed_answer must extract the substantive mathematical expression,
+    stripping equation assignment prefixes, inner delimiters, and punctuation."""
+    assert extract_boxed_answer(raw_response) == expected_extracted
+
+
+@pytest.mark.parametrize("question,boxed,verdict", [
+    # Derivative verified successfully even with 'y = ' or 'f\'(x) = ' prefix in box
+    ("Find the derivative of x^2", r"\boxed{y = 2*x}", True),
+    ("Find the derivative of x^2", r"\boxed{f'(x) = 2*x}", True),
+    ("Find the derivative of x^2", r"\boxed{\frac{dy}{dx} = 2*x}", True),
+    ("Find the derivative of x^2", r"\boxed{y = 3*x}", False),
+])
+def test_verify_cal_math_with_equation_prefixes(question, boxed, verdict):
+    """Answers formatted with equation prefixes must be cleanly verified
+    rather than causing parse errors."""
     correct, sympy_result, diagnostic = verify_cal_math(question, boxed)
     assert correct is verdict, (
         f"Expected verdict={verdict!r} but got correct={correct!r}. "
