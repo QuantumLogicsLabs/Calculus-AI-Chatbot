@@ -79,3 +79,22 @@ def test_build_messages_structure_with_summary_and_history():
     assert messages[1] == {"role": "system", "content": f"Earlier in this session: {summary}"}
     assert messages[2:4] == history
     assert messages[4] == {"role": "user", "content": "Why is it perpendicular to level curves?"}
+
+
+def test_system_prompt_has_response_length_enforcement_section():
+    """CAL_SYSTEM_PROMPT must contain a dedicated RESPONSE-LENGTH ENFORCEMENT
+    section that names all three word-count ceilings explicitly.  This prevents
+    the AI from silently drifting past the soft limits stated only in the
+    response-structure list."""
+    prompt = CAL_SYSTEM_PROMPT
+    assert "RESPONSE-LENGTH ENFORCEMENT" in prompt, (
+        "Missing RESPONSE-LENGTH ENFORCEMENT section in CAL_SYSTEM_PROMPT"
+    )
+    # All three ceiling values must appear verbatim.
+    assert "150 words" in prompt, "150-word ceiling missing from enforcement section"
+    assert "250 words" in prompt, "250-word ceiling missing from enforcement section"
+    assert "400 words" in prompt, "400-word ceiling missing from enforcement section"
+    # The section must instruct trimming, not just state the limits.
+    assert "trim" in prompt.lower(), (
+        "Enforcement section must tell the model to trim over-length drafts"
+    )
