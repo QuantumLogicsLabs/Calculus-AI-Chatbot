@@ -2,9 +2,9 @@ import pytest
 
 from aiService.services.math_verifier import (
     verify_cal_math,
-    preprocess_math_expr,
     _strip_differential,
     parse_operation,
+    extract_boxed_answer,
 )
 
 
