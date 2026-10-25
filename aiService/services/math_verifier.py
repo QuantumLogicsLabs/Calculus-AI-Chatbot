@@ -15,11 +15,22 @@ COMMON_SYMBOLS = {'x': x, 'y': y, 'z': z, 't': t, 'u': u, 'v': v}
 def preprocess_math_expr(expr: str) -> str:
     """
     Normalize common human/LLM math notation into SymPy-parseable syntax:
-    - '^' -> '**'
+    - '\\frac{a}{b}' -> '(a)/(b)'
+    - '\\sqrt{x}'    -> 'sqrt(x)'
+    - '^'            -> '**'
     - implicit multiplication: '2x' -> '2*x', 'x2' -> 'x*2', ')(' -> ')*('
     """
     if not expr:
         return expr
+    # Convert LaTeX fraction notation to plain division: \frac{a}{b} -> (a)/(b).
+    # Handles one level of nested braces (e.g. \frac{x^2}{x+1}).
+    expr = re.sub(
+        r'\\frac\{((?:[^{}]|\{[^{}]*\})*)\}\{((?:[^{}]|\{[^{}]*\})*)\}',
+        r'(\1)/(\2)',
+        expr,
+    )
+    # Convert LaTeX square root: \sqrt{x} -> sqrt(x).
+    expr = re.sub(r'\\sqrt\{((?:[^{}]|\{[^{}]*\})*)\}', r'sqrt(\1)', expr)
     # Standard LaTeX function names denote the same functions as SymPy syntax.
     # Keep this allowlist narrow; unsupported LaTeX remains unverifiable.
     expr = re.sub(r'\\(sin|cos|tan|exp|log|ln)\b',
@@ -110,7 +121,6 @@ def _strip_differential(expr: str) -> str:
     # Strip trailing differential: 'd<var>' or 'd <var>' (single letter or Greek).
     expr = re.sub(r'\s+d\s*[a-z]\w*$', '', expr, flags=re.IGNORECASE)
     return expr.strip()
-
 
 
 def parse_operation(question: str) -> Tuple[str, str, Optional[str]]:

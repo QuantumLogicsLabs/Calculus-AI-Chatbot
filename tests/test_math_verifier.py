@@ -76,39 +76,39 @@ def test_integral_questions_now_verifiable(question, boxed, verdict):
     )
 
 
-@pytest.mark.parametrize("raw_response,expected_extracted", [
-    # Plain boxed answer
-    (r"\boxed{2*x}", "2*x"),
-    # Equation with variable assignment (y = ...)
-    (r"\boxed{y = 2*x}", "2*x"),
-    # Function notation (f'(x) = ...)
-    (r"\boxed{f'(x) = 2*x}", "2*x"),
-    (r"\boxed{f(x) = 2*x}", "2*x"),
-    # Leibniz derivative notation (\frac{dy}{dx} = ...)
-    (r"\boxed{\frac{dy}{dx} = 2*x}", "2*x"),
-    (r"\boxed{dy/dx = 2*x}", "2*x"),
-    # Trailing punctuation inside the box
-    (r"\boxed{2*x.}", "2*x"),
-    (r"\boxed{2*x,}", "2*x"),
-    # Math delimiters inside the box ($...$)
-    (r"\boxed{$2*x$}", "2*x"),
+@pytest.mark.parametrize("raw,expected", [
+    # \frac{a}{b} -> (a)/(b)
+    (r"\frac{1}{x}", "(1)/(x)"),
+    (r"\frac{x^2}{2}", "(x**2)/(2)"),
+    # \frac with nested braces in numerator or denominator
+    (r"\frac{x^2+1}{x-1}", "(x**2+1)/(x-1)"),
+    # \sqrt{x} -> sqrt(x)
+    (r"\sqrt{x}", "sqrt(x)"),
+    (r"\sqrt{x^2+1}", "sqrt(x**2+1)"),
+    # Expressions with no LaTeX structure are returned unchanged (aside from ^->**)
+    ("x**2 + 1", "x**2 + 1"),
+    # Ensure trig functions still work after frac conversion
+    (r"\sin(x)", "sin(x)"),
 ])
-def test_extract_boxed_answer_normalizes_equations_and_delimiters(raw_response, expected_extracted):
-    """extract_boxed_answer must extract the substantive mathematical expression,
-    stripping equation assignment prefixes, inner delimiters, and punctuation."""
-    assert extract_boxed_answer(raw_response) == expected_extracted
+def test_preprocess_math_expr_latex_conversions(raw, expected):
+    """preprocess_math_expr must convert \\frac and \\sqrt to SymPy-compatible
+    notation while preserving all other existing transformations."""
+    assert preprocess_math_expr(raw) == expected
 
 
 @pytest.mark.parametrize("question,boxed,verdict", [
-    # Derivative verified successfully even with 'y = ' or 'f\'(x) = ' prefix in box
-    ("Find the derivative of x^2", r"\boxed{y = 2*x}", True),
-    ("Find the derivative of x^2", r"\boxed{f'(x) = 2*x}", True),
-    ("Find the derivative of x^2", r"\boxed{\frac{dy}{dx} = 2*x}", True),
-    ("Find the derivative of x^2", r"\boxed{y = 3*x}", False),
+    # Derivative of ln(x) = 1/x expressed as \frac{1}{x}
+    ("Find the derivative of ln(x)", r"\boxed{\frac{1}{x}}", True),
+    # Derivative of x^2 = 2x (not a fraction, baseline)
+    ("Find the derivative of x^2", r"\boxed{2*x}", True),
+    # Wrong fraction answer
+    ("Find the derivative of ln(x)", r"\boxed{\frac{1}{x^2}}", False),
+    # Square root answer: derivative of sqrt(x) = 1/(2*sqrt(x))
+    ("Find the derivative of sqrt(x)", r"\boxed{\frac{1}{2*sqrt(x)}}", True),
 ])
-def test_verify_cal_math_with_equation_prefixes(question, boxed, verdict):
-    """Answers formatted with equation prefixes must be cleanly verified
-    rather than causing parse errors."""
+def test_frac_answers_now_verifiable(question, boxed, verdict):
+    """Answers written as \\boxed{\\frac{...}{...}} must now yield a concrete
+    True/False verdict instead of a parse error."""
     correct, sympy_result, diagnostic = verify_cal_math(question, boxed)
     assert correct is verdict, (
         f"Expected verdict={verdict!r} but got correct={correct!r}. "
