@@ -49,7 +49,8 @@ def _valid_chat_body(body):
         and all(isinstance(body.get(key, ""), str) for key in ("topic", "summary", "difficulty"))
         and isinstance(body.get("history", []), list)
         and all(isinstance(item, dict) and item.get("role") in {"user", "assistant"}
-                and isinstance(item.get("content"), str) for item in body.get("history", []))
+                and isinstance(item.get("content"), str) and bool(item["content"].strip())
+                for item in body.get("history", []))
     )
 
 
