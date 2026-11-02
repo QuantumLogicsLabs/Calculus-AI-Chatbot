@@ -11,7 +11,14 @@ import aiosqlite
 
 logging.basicConfig(level=logging.INFO)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "calcvoyager.db")
+# Chat history file. Override with CHAT_DB_PATH to put it on a persistent disk:
+# free hosts (Render, Railway) wipe the app folder on every restart, which
+# would erase every saved chat. (CHAT_DB_PATH, not DB_PATH, so it can't clash
+# with the main backend's own DB_PATH when the chatbot is mounted inside it.)
+DB_PATH = os.getenv(
+    "CHAT_DB_PATH",
+    os.path.join(os.path.dirname(__file__), "calcvoyager.db"),
+)
 
 # ── Adaptive difficulty tuning (CB-18) ────────────────────────────────────────
 DIFFICULTY_LEVELS = ("beginner", "intermediate", "advanced")
