@@ -478,7 +478,10 @@ def _build_messages(message: str, topic: str, difficulty: str, history: list, su
             "content": f"Earlier in this session: {summary}"
         })
 
-    history = history[-_CACHE_HISTORY_WINDOW:] if history and len(history) > _CACHE_HISTORY_WINDOW else (history or [])
+    # Always cap history to the window, consistent with _cache_key.
+    # Using an unconditional slice makes the enforcement visible for all
+    # history lengths (including histories shorter than the window).
+    history = (history or [])[-_CACHE_HISTORY_WINDOW:]
     for item in history:
         messages.append({"role": item["role"], "content": item["content"]})
     messages.append({"role": "user", "content": message})
