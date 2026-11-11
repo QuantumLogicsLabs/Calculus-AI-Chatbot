@@ -58,10 +58,11 @@ async def chat_endpoint(request: Request):
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+        return JSONResponse({"detail": "Invalid JSON body", "code": "invalid_json"}, status_code=400)
 
     if not _valid_chat_body(body):
-        return JSONResponse({"detail": "A message and valid conversation history are required"}, status_code=400)
+        return JSONResponse({"detail": "A message and valid conversation history are required",
+                             "code": "invalid_request"}, status_code=400)
     message = body["message"]
 
     topic = body.get("topic", "")
@@ -88,10 +89,11 @@ async def chat_stream_endpoint(request: Request):
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+        return JSONResponse({"detail": "Invalid JSON body", "code": "invalid_json"}, status_code=400)
 
     if not _valid_chat_body(body):
-        return JSONResponse({"detail": "A message and valid conversation history are required"}, status_code=400)
+        return JSONResponse({"detail": "A message and valid conversation history are required",
+                             "code": "invalid_request"}, status_code=400)
     message = body["message"]
 
     topic = body.get("topic", "")
@@ -130,10 +132,10 @@ async def summarize_endpoint(request: Request):
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+        return JSONResponse({"detail": "Invalid JSON body", "code": "invalid_json"}, status_code=400)
 
     if not isinstance(body, dict) or not isinstance(body.get("messages", []), list):
-        return JSONResponse({"detail": "messages must be an array"}, status_code=400)
+        return JSONResponse({"detail": "messages must be an array", "code": "invalid_request"}, status_code=400)
     messages = body.get("messages", [])
     previous_summary = body.get("previous_summary", "")
 
