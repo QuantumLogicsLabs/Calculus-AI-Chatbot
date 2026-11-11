@@ -192,8 +192,6 @@ STEP C — VERIFY THE MATHEMATICS (problem-solving and answer evaluation):
     - Preserve parentheses, bounds, limits, and given conditions.
     - Check domain restrictions and excluded values when relevant.
     - For definite integrals, verify the bounds and final evaluation.
-    - For indefinite integrals, include the constant of integration.
-    - For vector calculus, verify components and vector operations.
 
   If evaluating a student's answer, locate the first incorrect step
   rather than only stating that the final answer is wrong.
