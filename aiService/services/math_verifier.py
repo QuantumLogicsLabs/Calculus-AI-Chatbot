@@ -15,21 +15,22 @@ COMMON_SYMBOLS = {'x': x, 'y': y, 'z': z, 't': t, 'u': u, 'v': v}
 def preprocess_math_expr(expr: str) -> str:
     """
     Normalize common human/LLM math notation into SymPy-parseable syntax:
-    - '|x|', '\\vert x \\vert' -> 'Abs(x)'
-    - '\\cdot'  -> '*'
-    - '^'      -> '**'
+    - '\\frac{a}{b}' -> '(a)/(b)'
+    - '\\sqrt{x}'    -> 'sqrt(x)'
+    - '^'            -> '**'
     - implicit multiplication: '2x' -> '2*x', 'x2' -> 'x*2', ')(' -> ')*('
     """
     if not expr:
         return expr
-    # Convert LaTeX and standard absolute-value notation (|x|, \vert x \vert) to Abs(x).
-    expr = re.sub(r'\\left\\vert\s*(.*?)\s*\\right\\vert', r'Abs(\1)', expr)
-    expr = re.sub(r'\\left\|\s*(.*?)\s*\\right\|', r'Abs(\1)', expr)
-    expr = re.sub(r'\\vert\s*(.*?)\s*\\vert', r'Abs(\1)', expr)
-    expr = re.sub(r'\|([^|]+)\|', r'Abs(\1)', expr)
-    # Convert LaTeX multiplication dot to Python *, e.g. 2\cdot x -> 2*x.
-    # Absorb any surrounding whitespace so '2 \cdot x' and '2\cdot x' both yield '2*x'.
-    expr = re.sub(r'\s*\\cdot\s*', '*', expr)
+    # Convert LaTeX fraction notation to plain division: \frac{a}{b} -> (a)/(b).
+    # Handles one level of nested braces (e.g. \frac{x^2}{x+1}).
+    expr = re.sub(
+        r'\\frac\{((?:[^{}]|\{[^{}]*\})*)\}\{((?:[^{}]|\{[^{}]*\})*)\}',
+        r'(\1)/(\2)',
+        expr,
+    )
+    # Convert LaTeX square root: \sqrt{x} -> sqrt(x).
+    expr = re.sub(r'\\sqrt\{((?:[^{}]|\{[^{}]*\})*)\}', r'sqrt(\1)', expr)
     # Standard LaTeX function names denote the same functions as SymPy syntax.
     # Keep this allowlist narrow; unsupported LaTeX remains unverifiable.
     expr = re.sub(r'\\(sin|cos|tan|exp|log|ln)\b',
@@ -120,7 +121,6 @@ def _strip_differential(expr: str) -> str:
     # Strip trailing differential: 'd<var>' or 'd <var>' (single letter or Greek).
     expr = re.sub(r'\s+d\s*[a-z]\w*$', '', expr, flags=re.IGNORECASE)
     return expr.strip()
-
 
 
 def parse_operation(question: str) -> Tuple[str, str, Optional[str]]:

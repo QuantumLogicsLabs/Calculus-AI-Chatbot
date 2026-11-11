@@ -98,3 +98,16 @@ def test_system_prompt_has_response_length_enforcement_section():
     assert "trim" in prompt.lower(), (
         "Enforcement section must tell the model to trim over-length drafts"
     )
+
+
+def test_system_prompt_enforces_step_labeling_verb_requirement():
+    """CAL_SYSTEM_PROMPT must explicitly require action verbs in step labels
+    to ensure step headings describe mathematical actions rather than bare formulas."""
+    prompt = CAL_SYSTEM_PROMPT
+    assert "imperative verb requirement" in prompt.lower()
+    assert "action verb" in prompt.lower()
+    assert "Differentiate" in prompt
+    assert "Integrate" in prompt
+    assert "Substitute" in prompt
+    assert "Step 1: 6xy" in prompt
+    assert "non-verb step titles" in prompt.lower()
