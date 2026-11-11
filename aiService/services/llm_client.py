@@ -858,9 +858,31 @@ async def ask_llm(message: str, topic: str = "", history: list = None,
     return result
 
 
-SUMMARY_PROMPT = """Compress this calculus tutoring conversation into a 3-5 sentence
-running summary. Note topics covered, where the student struggled, and what
-was already explained. Do not include LaTeX or follow-up suggestions."""
+SUMMARY_PROMPT = """
+Summarize the calculus tutoring conversation to preserve useful context
+for future responses.
+
+Include:
+1. Topics and mathematical concepts already covered.
+2. Problems solved and important results established.
+3. Concepts the student understands confidently.
+4. Specific misunderstandings, recurring mistakes, or weak areas.
+5. Teaching approaches or explanations that helped.
+6. Unfinished questions or topics that should be continued.
+7. The student's current learning level, based only on demonstrated
+   understanding in the conversation.
+
+Instructions:
+- Preserve important mathematical notation and formulas accurately.
+- Distinguish confirmed understanding from topics merely discussed.
+- Retain corrections to earlier mistakes and the final verified results.
+- Avoid repeating lengthy derivations or unnecessary conversation details.
+- Do not invent abilities, preferences, or learning progress.
+- Keep the summary concise, structured, and useful for future tutoring.
+- If a detail is uncertain, label it as uncertain rather than assuming.
+
+Return only the summary.
+"""
 
 
 async def summarize_history(messages: list, previous_summary: str = "") -> str:
