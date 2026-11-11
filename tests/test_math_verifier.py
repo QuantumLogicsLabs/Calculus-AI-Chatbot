@@ -2,6 +2,7 @@ import pytest
 
 from aiService.services.math_verifier import (
     verify_cal_math,
+    preprocess_math_expr,
     _strip_differential,
     parse_operation,
     extract_boxed_answer,
@@ -114,3 +115,84 @@ def test_frac_answers_now_verifiable(question, boxed, verdict):
         f"Expected verdict={verdict!r} but got correct={correct!r}. "
         f"sympy_result={sympy_result!r}, diagnostic={diagnostic!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# \cdot multiplication preprocessing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    # Basic \cdot replacement
+    (r"2\cdot x",        "2*x"),
+    # \cdot with surrounding spaces (common in hand-written LaTeX)
+    (r"2 \cdot x",       "2*x"),
+    # Multiple \cdot tokens in one expression
+    (r"3\cdot x\cdot y", "3*x*y"),
+    # \cdot between parenthesised sub-expressions
+    (r"(x+1)\cdot(x-1)", "(x+1)*(x-1)"),
+    # No \cdot — expression returned unchanged by this step
+    ("2*x + 1",          "2*x + 1"),
+    # \cdot adjacent to a trig function — note preprocess also converts \sin→sin
+    (r"2\cdot\sin(x)",   "2*sin(x)"),
+])
+def test_preprocess_cdot_to_multiplication(raw, expected):
+    r"""preprocess_math_expr must replace every \cdot token with '*',
+    absorbing any surrounding whitespace."""
+    assert preprocess_math_expr(raw) == expected
+
+
+def test_verify_cal_math_with_cdot_in_answer():
+    r"""An answer written as '2\cdot x' must verify correctly against the
+    derivative of x^2, demonstrating end-to-end \cdot normalisation."""
+    question = "Find the derivative of x^2"
+    boxed = r"\boxed{2\cdot x}"
+    correct, sympy_result, diagnostic = verify_cal_math(question, boxed)
+    assert correct is True, (
+        f"Expected True but got correct={correct!r}. "
+        f"sympy_result={sympy_result!r}, diagnostic={diagnostic!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Absolute value preprocessing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    # Standard pipe notation |x|
+    ("|x|", "Abs(x)"),
+    # Pipe notation with expression inside
+    ("|x - 2|", "Abs(x - 2)"),
+    # LaTeX \vert notation
+    (r"\vert x \vert", "Abs(x)"),
+    # LaTeX \left| ... \right|
+    (r"\left| x \right|", "Abs(x)"),
+    # LaTeX \left\vert ... \right\vert
+    (r"\left\vert x - y \right\vert", "Abs(x - y)"),
+    # Multiple absolute values in expression
+    ("|x| + |y|", "Abs(x) + Abs(y)"),
+    # Implicit multiplication with leading digit
+    ("2|x|", "2*Abs(x)"),
+    # Combined with \cdot
+    (r"|x| \cdot 3", "Abs(x)*3"),
+])
+def test_preprocess_abs_notation(raw, expected):
+    r"""preprocess_math_expr must normalize pipe and LaTeX vert absolute-value
+    delimiters into SymPy-parseable Abs(...) function calls."""
+    assert preprocess_math_expr(raw) == expected
+
+
+def test_verify_cal_math_with_abs_in_question_and_answer():
+    r"""Questions and boxed answers with absolute-value notation must verify
+    correctly end-to-end rather than failing with parse errors."""
+    question = "Simplify |x - 2|"
+    boxed = r"\boxed{|x - 2|}"
+    correct, sympy_result, diagnostic = verify_cal_math(question, boxed)
+    assert correct is True, (
+        f"Expected True but got correct={correct!r}. "
+        f"sympy_result={sympy_result!r}, diagnostic={diagnostic!r}"
+    )
+
+    # And verify mismatch returns False
+    wrong_boxed = r"\boxed{|x - 3|}"
+    wrong_correct, _, _ = verify_cal_math(question, wrong_boxed)
+    assert wrong_correct is False

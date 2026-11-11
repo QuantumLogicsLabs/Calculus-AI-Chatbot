@@ -126,14 +126,56 @@ Before producing any response visible to the student, privately
 reason through this checklist inside a <scratchpad> block.
 The scratchpad is NEVER shown to the student.
 
+
 <scratchpad>
-STEP A — Classify the input:
-  [ ] Conceptual question    → Template 1
-  [ ] Problem-solving        → Template 2
-  [ ] Confusion              → Template 3
-  [ ] Answer evaluation      → Template 4
-  [ ] Off-topic              → Template 5
-  [ ] Ambiguous              → ask ONE clarifying question
+STEP A — Classify the student's primary intent:
+
+  [ ] CONCEPT EXPLANATION
+      The student wants to understand a definition, concept,
+      theorem, formula, or mathematical relationship.
+
+  [ ] DIRECT PROBLEM SOLVING
+      The student wants a complete solution to a specific problem.
+
+  [ ] GUIDED LEARNING
+      The student wants help progressing through a problem
+      without immediately receiving the complete solution.
+
+  [ ] HINT REQUEST
+      The student explicitly asks for a clue or a small hint.
+      Give only enough guidance to help them take the next step.
+
+  [ ] ANSWER VERIFICATION
+      The student provides an answer and asks whether it is correct.
+      Check the answer independently before evaluating it.
+
+  [ ] ERROR CORRECTION
+      The student presents an incorrect calculation, step, or method.
+      Identify the first incorrect step and explain the mistake.
+
+  [ ] FOLLOW-UP QUESTION
+      The student refers to something discussed earlier.
+      Use conversation history to understand the reference and
+      continue from the relevant point.
+
+  [ ] AMBIGUOUS OR INCOMPLETE
+      Essential information is missing or the request has multiple
+      materially different interpretations.
+      Ask ONE focused clarifying question.
+
+  [ ] OUT-OF-SCOPE
+      The request is unrelated to the calculus topics supported
+      by this tutor.
+
+  CLASSIFICATION RULES:
+  - Identify the student's primary intent before selecting a response.
+  - A request for a hint must not automatically become a full solution.
+  - A request to check an answer requires independent verification.
+  - A follow-up must be interpreted using relevant conversation context.
+  - If multiple intents are present, address the explicit request first.
+  - Do not display classification labels to the student.
+</scratchpad>
+
 
 STEP B — Check scope:
   [ ] In scope               → proceed
@@ -365,10 +407,15 @@ DIFFICULTY_GUIDANCE = {
 
 
 def _build_system_content(topic: str, difficulty: str) -> str:
+    # Normalise blank or unrecognised difficulty values to the safe default so
+    # the DIFFICULTY_GUIDANCE lookup is never silently falling back on an
+    # unexpected key (e.g. an empty-string sent by the client).
+    if not difficulty or difficulty not in DIFFICULTY_GUIDANCE:
+        difficulty = "intermediate"
     system_content = CAL_SYSTEM_PROMPT
     if topic:
         system_content += f"\n\n[PAGE CONTEXT: {topic}]"
-    system_content += DIFFICULTY_GUIDANCE.get(difficulty, DIFFICULTY_GUIDANCE["intermediate"])
+    system_content += DIFFICULTY_GUIDANCE[difficulty]
     return system_content
 
 
@@ -473,7 +520,10 @@ def _build_messages(message: str, topic: str, difficulty: str, history: list, su
             "content": f"Earlier in this session: {summary}"
         })
 
-    history = history[-_CACHE_HISTORY_WINDOW:] if history and len(history) > _CACHE_HISTORY_WINDOW else (history or [])
+    # Always cap history to the window, consistent with _cache_key.
+    # Using an unconditional slice makes the enforcement visible for all
+    # history lengths (including histories shorter than the window).
+    history = (history or [])[-_CACHE_HISTORY_WINDOW:]
     for item in history:
         messages.append({"role": item["role"], "content": item["content"]})
     messages.append({"role": "user", "content": message})
