@@ -365,10 +365,15 @@ DIFFICULTY_GUIDANCE = {
 
 
 def _build_system_content(topic: str, difficulty: str) -> str:
+    # Normalise blank or unrecognised difficulty values to the safe default so
+    # the DIFFICULTY_GUIDANCE lookup is never silently falling back on an
+    # unexpected key (e.g. an empty-string sent by the client).
+    if not difficulty or difficulty not in DIFFICULTY_GUIDANCE:
+        difficulty = "intermediate"
     system_content = CAL_SYSTEM_PROMPT
     if topic:
         system_content += f"\n\n[PAGE CONTEXT: {topic}]"
-    system_content += DIFFICULTY_GUIDANCE.get(difficulty, DIFFICULTY_GUIDANCE["intermediate"])
+    system_content += DIFFICULTY_GUIDANCE[difficulty]
     return system_content
 
 

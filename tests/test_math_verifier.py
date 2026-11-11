@@ -2,6 +2,7 @@ import pytest
 
 from aiService.services.math_verifier import (
     verify_cal_math,
+    preprocess_math_expr,
     _strip_differential,
     parse_operation,
     extract_boxed_answer,
@@ -112,5 +113,41 @@ def test_frac_answers_now_verifiable(question, boxed, verdict):
     correct, sympy_result, diagnostic = verify_cal_math(question, boxed)
     assert correct is verdict, (
         f"Expected verdict={verdict!r} but got correct={correct!r}. "
+        f"sympy_result={sympy_result!r}, diagnostic={diagnostic!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# \cdot multiplication preprocessing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    # Basic \cdot replacement
+    (r"2\cdot x",        "2*x"),
+    # \cdot with surrounding spaces (common in hand-written LaTeX)
+    (r"2 \cdot x",       "2*x"),
+    # Multiple \cdot tokens in one expression
+    (r"3\cdot x\cdot y", "3*x*y"),
+    # \cdot between parenthesised sub-expressions
+    (r"(x+1)\cdot(x-1)", "(x+1)*(x-1)"),
+    # No \cdot — expression returned unchanged by this step
+    ("2*x + 1",          "2*x + 1"),
+    # \cdot adjacent to a trig function — note preprocess also converts \sin→sin
+    (r"2\cdot\sin(x)",   "2*sin(x)"),
+])
+def test_preprocess_cdot_to_multiplication(raw, expected):
+    r"""preprocess_math_expr must replace every \cdot token with '*',
+    absorbing any surrounding whitespace."""
+    assert preprocess_math_expr(raw) == expected
+
+
+def test_verify_cal_math_with_cdot_in_answer():
+    r"""An answer written as '2\cdot x' must verify correctly against the
+    derivative of x^2, demonstrating end-to-end \cdot normalisation."""
+    question = "Find the derivative of x^2"
+    boxed = r"\boxed{2\cdot x}"
+    correct, sympy_result, diagnostic = verify_cal_math(question, boxed)
+    assert correct is True, (
+        f"Expected True but got correct={correct!r}. "
         f"sympy_result={sympy_result!r}, diagnostic={diagnostic!r}"
     )
