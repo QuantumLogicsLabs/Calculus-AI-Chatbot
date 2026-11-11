@@ -15,12 +15,18 @@ COMMON_SYMBOLS = {'x': x, 'y': y, 'z': z, 't': t, 'u': u, 'v': v}
 def preprocess_math_expr(expr: str) -> str:
     """
     Normalize common human/LLM math notation into SymPy-parseable syntax:
+    - '|x|', '\\vert x \\vert' -> 'Abs(x)'
     - '\\cdot'  -> '*'
     - '^'      -> '**'
     - implicit multiplication: '2x' -> '2*x', 'x2' -> 'x*2', ')(' -> ')*('
     """
     if not expr:
         return expr
+    # Convert LaTeX and standard absolute-value notation (|x|, \vert x \vert) to Abs(x).
+    expr = re.sub(r'\\left\\vert\s*(.*?)\s*\\right\\vert', r'Abs(\1)', expr)
+    expr = re.sub(r'\\left\|\s*(.*?)\s*\\right\|', r'Abs(\1)', expr)
+    expr = re.sub(r'\\vert\s*(.*?)\s*\\vert', r'Abs(\1)', expr)
+    expr = re.sub(r'\|([^|]+)\|', r'Abs(\1)', expr)
     # Convert LaTeX multiplication dot to Python *, e.g. 2\cdot x -> 2*x.
     # Absorb any surrounding whitespace so '2 \cdot x' and '2\cdot x' both yield '2*x'.
     expr = re.sub(r'\s*\\cdot\s*', '*', expr)
@@ -166,6 +172,11 @@ def parse_operation(question: str) -> Tuple[str, str, Optional[str]]:
         expr = _strip_differential(match.group(1).strip() if match else '1/x')
         point = _extract_limit_point(question_lower)
         return 'limit', expr, point
+
+    if 'simplify' in question_lower or 'evaluate' in question_lower:
+        match = re.search(r'(?:simplify|evaluate)\s+(?:the\s+)?(?:expression\s+)?([^.?]+)', question_lower)
+        expr = match.group(1).strip() if match else question_lower.strip()
+        return 'simplify', expr, None
 
     return 'simplify', question_lower.strip(), None
 
