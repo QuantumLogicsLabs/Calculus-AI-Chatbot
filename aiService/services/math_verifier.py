@@ -173,6 +173,11 @@ def parse_operation(question: str) -> Tuple[str, str, Optional[str]]:
         point = _extract_limit_point(question_lower)
         return 'limit', expr, point
 
+    if 'simplify' in question_lower or 'evaluate' in question_lower:
+        match = re.search(r'(?:simplify|evaluate)\s+(?:the\s+)?(?:expression\s+)?([^.?]+)', question_lower)
+        expr = match.group(1).strip() if match else question_lower.strip()
+        return 'simplify', expr, None
+
     return 'simplify', question_lower.strip(), None
 
 
